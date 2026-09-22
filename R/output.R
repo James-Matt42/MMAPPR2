@@ -6,7 +6,7 @@
 #'
 #' @return A \linkS4class{MmapprData} object after writing output files
 #'   to the folder specified in the \code{outputFolder} slot of the
-#'   \code{link{MmapprParam}} used.
+#'   \code{\link{MmapprParam}} used.
 #' @export
 #'
 #' @examples
@@ -36,7 +36,9 @@ outputMmapprData <- function(mmapprData) {
   stopifnot(is(mmapprData, "MmapprData"))
   
   if (!dir.exists(outputFolder(param(mmapprData)))) {
-    mmapprData <- .prepareOutputFolder(mmapprData)
+    # [FIX] The old recovery branch passed the entire MmapprData object to a
+    # function expecting a path, then overwrote mmapprData with the returned path.
+    dir.create(outputFolder(param(mmapprData)), recursive = TRUE, showWarnings = FALSE)
   }
   current_devs = dev.list() # get open graphics devices to help cleanup
   if (length(snpDistance(mmapprData)) > 0) {
@@ -44,8 +46,11 @@ outputMmapprData <- function(mmapprData) {
       .plotGenomeDistance(mmapprData)
       .plotPeaks(mmapprData)
     }, finally = {
-      opened_devs <- dev.list()[!(dev.list() %in% current_devs)]
-      if (length(opened_devs) > 0) dev.off(opened_devs)
+      now <- dev.list()
+      opened_devs <- if (is.null(now)) integer() else now[!(now %in% current_devs)]
+      if (length(opened_devs) > 0L) {
+        for (d in rev(opened_devs)) try(grDevices::dev.off(which = d), silent = TRUE)
+      }
     })
   }
   
@@ -54,62 +59,162 @@ outputMmapprData <- function(mmapprData) {
                           outputFolder(param(mmapprData)))
   }
   
-  invisible(1)
+  # [FIX] Return the object documented by the public API, invisibly so scripts
+  # can chain output without noisy printing.
+  invisible(mmapprData)
 }
 
 
-.defaultOutputFolder <- function()
-  paste0("mmappr2_", format(Sys.time(), "%Y-%m-%d_%H:%M:%S"))
+.atomicSaveRDS <- function(object, file, .renameFile = file.rename) {
+  dir <- dirname(file)
+  if (!dir.exists(dir)) stop("RDS destination directory does not exist: ", dir)
+  tmp <- tempfile(pattern = paste0(".", basename(file), "."), tmpdir = dir)
+  on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
+
+  saveRDS(object, tmp)
+  info <- file.info(tmp)
+  if (!file.exists(tmp) || is.na(info$size) || info$size <= 0)
+    stop("Temporary RDS serialization failed: ", tmp)
+
+  # Same-directory rename replaces atomically on normal POSIX filesystems. Some
+  # platforms (notably Windows) refuse to rename over an existing destination.
+  # In that case move the old readable file aside first, then restore it if the
+  # completed temporary file still cannot be installed. Never delete the only
+  # readable prior state before the replacement succeeds.
+  if (!.renameFile(tmp, file)) {
+    if (!file.exists(file))
+      stop("Could not move completed RDS into place: ", file)
+
+    backup <- tempfile(pattern = paste0(".", basename(file), ".previous."), tmpdir = dir)
+    if (file.exists(backup)) unlink(backup, force = TRUE)
+    if (!.renameFile(file, backup))
+      stop("Could not move existing RDS aside for replacement: ", file)
+
+    installed <- .renameFile(tmp, file)
+    if (!installed) {
+      restored <- .renameFile(backup, file)
+      if (!restored) {
+        stop("Could not install completed RDS and could not restore the previous file. ",
+             "Previous state remains at: ", backup)
+      }
+      stop("Could not install completed RDS; previous file was restored: ", file)
+    }
+
+    if (file.exists(backup)) {
+      rc <- unlink(backup, force = TRUE)
+      if (!identical(as.integer(rc), 0L) || file.exists(backup))
+        warning("Replacement succeeded but previous RDS backup could not be removed: ", backup)
+    }
+  }
+  invisible(file)
+}
+
+
+.defaultOutputFolder <- function() {
+  stamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
+  # [IMPROVE] tempfile() adds a collision-resistant suffix without consuming R's
+  # random-number stream, so two analyses started in the same second do not clash.
+  basename(tempfile(pattern = paste0("mmappr2_", stamp, "_"), tmpdir = getwd()))
+}
 
 
 #' @title Generate temporary output folder
 #' @name tempOutputFolder
-#' @usage Conveniently creates a timestamp-named temporary directory
+#' Returns a unique temporary output-directory path. The directory is created
+#' by \code{mmapprParam()} when the parameter object is constructed.
 #'
 #' @return The path to the temporary directory
 #' @export
 #'
 #' @examples
 #' if (requireNamespace('MMAPPR2data', quietly = TRUE)) {
-#'     mmappr_param <- MmapprParam(refFasta = MMAPPR2data::goldenFasta(),
+#'     mmappr_param <- mmapprParam(refFasta = MMAPPR2data::goldenFasta(),
 #'                                 wtFiles = MMAPPR2data::exampleWTbam(),
 #'                                 mutFiles = MMAPPR2data::exampleMutBam(),
-#'                                 species = "danio_rerio",
+#'                                 gtf = MMAPPR2data::gtf(),
 #'                                 outputFolder = tempOutputFolder())
 #' }
 NULL
 
 
 tempOutputFolder <- function() {
-  file.path(tempdir(), .defaultOutputFolder())
+  # Return a unique path; mmapprParam() creates it. This avoids same-second name
+  # collisions in tests and parallel workflows.
+  tempfile(pattern = paste0("mmappr2_", format(Sys.time(), "%Y-%m-%d_%H-%M-%S"), "_"),
+           tmpdir = tempdir())
 }
 
 
-.prepareOutputFolder <- function(outputFolder) {
-  if(dir.exists(outputFolder)){
-    message(sprintf("Output folder %s has already been created",
-                    outputFolder))
-    answer <- readline(
-        "Would you like to overwrite previously created results folder (Y/n)?\n")
-    if (answer == "n") {
-      newOutputFolder <-
-        readline("Please enter name for new output folder or press enter for default: ")
-      if (is.na(newOutputFolder))
-        outputFolder <- .defaultOutputFolder()
-      else outputFolder <- newOutputFolder
-      dir.create(outputFolder)
-    } else {
-      unlink(file.path(outputFolder, '*'))
+.prepareOutputFolder <- function(outputFolder, overwrite = FALSE) {
+  if (!is.character(outputFolder) || length(outputFolder) != 1L || !nzchar(outputFolder))
+    stop("outputFolder must be one non-empty path")
+
+  if (dir.exists(outputFolder)) {
+    existingPath <- normalizePath(outputFolder, mustWork = TRUE)
+
+    # [FIX] Evaluate overwrite safety BEFORE checking whether the directory is
+    # currently empty. The previous guard only ran inside `length(contents) > 0`,
+    # so `overwrite=TRUE` could accept R's session temp root (or another protected
+    # directory) whenever it happened to be empty. Safety must be a property of
+    # the target path itself, not of its current contents.
+    if (isTRUE(overwrite)) {
+      protected <- unique(normalizePath(c(path.expand("~"), getwd(), tempdir()),
+                                        mustWork = TRUE))
+      isRoot <- identical(dirname(existingPath), existingPath)
+      parent <- dirname(existingPath)
+      isTopLevel <- !isRoot && identical(dirname(parent), parent)
+      if (isRoot || isTopLevel || existingPath %in% protected)
+        stop("Refusing to overwrite protected directory: ", existingPath)
+    }
+
+    contents <- list.files(existingPath, all.files = TRUE, no.. = TRUE)
+    if (length(contents) > 0L) {
+      if (!isTRUE(overwrite)) {
+        stop("Output folder already exists and is not empty: ", outputFolder,
+             ". Choose a new folder or set overwrite=TRUE explicitly.")
+      }
+      unlink(file.path(existingPath, contents), recursive = TRUE, force = TRUE)
+      stillThere <- list.files(existingPath, all.files = TRUE, no.. = TRUE)
+      if (length(stillThere) > 0L)
+        stop("Could not fully clear output folder: ", existingPath)
     }
   } else {
-    dir.create(outputFolder, recursive = TRUE)
+    ok <- dir.create(outputFolder, recursive = TRUE, showWarnings = FALSE)
+    if (!ok && !dir.exists(outputFolder)) stop("Could not create output folder: ", outputFolder)
   }
-  
-  file.create(file.path(outputFolder, 'mmappr2.log'))
-  
-  return(outputFolder)
+
+  outputFolder <- normalizePath(outputFolder, mustWork = TRUE)
+  logPath <- file.path(outputFolder, "mmappr2.log")
+  if (!file.exists(logPath) && !file.create(logPath))
+    stop("Could not create log file in output folder: ", outputFolder)
+  outputFolder
 }
 
+
+
+.safeYLim <- function(x, upperPad = 0.10) {
+  # [FIX] Base plot() rejects zero-width or non-finite limits. Constant/degenerate
+  # fits can occur on small datasets, so construct a finite visible range.
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) return(c(0, 1))
+  lo <- min(x); hi <- max(x)
+  if (lo == hi) {
+    pad <- if (lo == 0) 1 else max(abs(lo) * upperPad, .Machine$double.eps^0.5)
+    return(c(lo - pad, hi + pad))
+  }
+  c(lo, hi + (hi - lo) * upperPad)
+}
+
+.safeXLim <- function(x, padFraction = 0.01) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) return(c(0, 1))
+  lo <- min(x); hi <- max(x)
+  if (lo == hi) {
+    pad <- if (lo == 0) 1 else max(abs(lo) * padFraction, 1)
+    return(c(lo - pad, hi + pad))
+  }
+  c(lo, hi)
+}
 
 .plotGenomeDistance <- function(mmapprData, savePdf = TRUE) {
   #generate one big dataframe for plots, along with break and label points
@@ -117,36 +222,44 @@ tempOutputFolder <- function() {
   plotDf <- NULL
   breaks <- tailPos
   labelpos <- NULL
-  for (i in orderSeqlevels(names(mmapprData@snpDistance))) {
+  for (i in GenomeInfoDb::orderSeqlevels(names(mmapprData@snpDistance))) {
     if (!is(mmapprData@snpDistance[[i]], 'list'))
       next
     else if (!("loess" %in% names(mmapprData@snpDistance[[i]])))
-      stop("Distance list for sequence %s missing loess fit data",
-           names(mmapprData@snpDistance)[i])
+      stop(sprintf("Distance list for sequence %s missing loess fit data",
+                   names(mmapprData@snpDistance)[i]))
     
     chrLoess <- mmapprData@snpDistance[[i]]$loess
-    chrDf <- data.frame(pos = chrLoess$x + tailPos,
+    chrX <- as.numeric(chrLoess$x)
+    chrDf <- data.frame(pos = chrX + tailPos,
                         seqname = names(mmapprData@snpDistance)[i],
-                        fitted = chrLoess$fitted, unfitted = chrLoess$y)
+                        fitted = as.numeric(chrLoess$fitted),
+                        unfitted = as.numeric(chrLoess$y))
     plotDf <- rbind(plotDf, chrDf)
     tailPos <- chrDf$pos[nrow(chrDf)]
     breaks <- c(breaks, tailPos)
     labelpos <-
       c(labelpos, (breaks[length(breaks)]+breaks[length(breaks)-1])/2)
   }
-  
-  if (savePdf)
+
+  if (is.null(plotDf) || nrow(plotDf) == 0L)
+    stop("No successfully fitted chromosome data are available for genome plotting")
+
+  openedPdf <- FALSE
+  if (savePdf) {
     pdf(file.path(mmapprData@param@outputFolder, "genome_plots.pdf"),
         width = 11, height = 8.5)
+    openedPdf <- TRUE
+    on.exit(if (openedPdf) try(grDevices::dev.off(), silent = TRUE), add = TRUE)
+  }
   par(mfrow = c(2,1))
   
   plot(x = plotDf$pos, y = plotDf$fitted, type = 'l',
-       ylim = c(min(plotDf$fitted, na.rm = TRUE),
-                1.1*max(plotDf$fitted, na.rm = TRUE)),
+       ylim = .safeYLim(plotDf$fitted),
        ylab = NA,
        xaxt = 'n', xaxs = 'i', xlab = "Chromosome")
-  abline(v = (breaks[seq_len(length(breaks))-1]+2), col = "grey")
-  mtext(unique(gsub("chr", "", plotDf$seqname[!is.na(plotDf$seqname)])),
+  abline(v = breaks[seq_len(length(breaks) - 1L)], col = "grey")
+  mtext(unique(sub("^chr", "", plotDf$seqname[!is.na(plotDf$seqname)])),
         at = labelpos, side = 1, cex = .6)
   mtext(substitute("ED"^p~ ~"(Loess fit)",
                    list(p = mmapprData@param@distancePower)), 
@@ -154,99 +267,217 @@ tempOutputFolder <- function() {
   
   plot(x = plotDf$pos, y = plotDf$unfitted, 
        pch = 16, cex = .8, col = "#999999AA",
-       ylim = c(min(plotDf$unfitted, na.rm = TRUE),
-                1.1*max(plotDf$unfitted, na.rm = TRUE)),
+       ylim = .safeYLim(plotDf$unfitted),
        ylab = NA,
        xaxt = 'n', xaxs = 'i', xlab = "Chromosome" )
   abline(v = (breaks), col = "grey")
-  mtext(unique(gsub("chr", "", plotDf$seqname[!is.na(plotDf$seqname)])),
+  mtext(unique(sub("^chr", "", plotDf$seqname[!is.na(plotDf$seqname)])),
         at = labelpos, side = 1, cex = .6)
-  mtext(substitute("ED"^p~ ~"(Loess fit)", 
+  mtext(substitute("ED"^p,
                    list(p = mmapprData@param@distancePower)),
         side = 2, line = 2)
   
-  if (savePdf) dev.off()
+  if (openedPdf) {
+    grDevices::dev.off()
+    openedPdf <- FALSE
+  }
 }
 
 
 .plotPeaks <- function(mmapprData) {
+  if (length(mmapprData@peaks) == 0L) return(invisible(NULL))
   pdf(file.path(mmapprData@param@outputFolder, "peak_plots.pdf"),
       width = 11, height = 8.5)
+  deviceOpen <- TRUE
+  on.exit(if (deviceOpen) try(grDevices::dev.off(), silent = TRUE), add = TRUE)
   par(mfrow = c(2,1), mar = c(5, 4, 4, 4))
-  
-  for (seqname in names(mmapprData@peaks)){
+
+  for (seqname in names(mmapprData@peaks)) {
     chrLoess <- mmapprData@snpDistance[[seqname]]$loess
+    chrX <- as.numeric(chrLoess$x)
+    fitted <- as.numeric(chrLoess$fitted)
+    rawY <- as.numeric(chrLoess$y)
     start <- mmapprData@peaks[[seqname]]$start
     end <- mmapprData@peaks[[seqname]]$end
     densityData <- mmapprData@peaks[[seqname]]$densityData
-    
-    plot(chrLoess$x/1000000, chrLoess$fitted, type = 'l',
-         ylim = c(min(chrLoess$fitted, na.rm = TRUE),
-                  1.1*max(chrLoess$fitted, na.rm = TRUE)),
-         xlim = c(chrLoess$x[1], tail(chrLoess$x, n = 1)) * 1E-6,
-         xlab = paste(seqname,"Base Position (MB)"),
+    yLim <- .safeYLim(fitted)
+    xLim <- .safeXLim(chrX) * 1E-6
+
+    plot(chrX/1000000, fitted, type = 'l',
+         ylim = yLim, xlim = xLim,
+         xlab = paste(seqname, "Base Position (MB)"),
          ylab = NA, xaxs = 'i')
     mtext(substitute("ED"^p~ ~"(Loess fit)",
                      list(p = mmapprData@param@distancePower)),
           side = 2, line = 2)
-    shadeX <- c(start,
-                chrLoess$x[chrLoess$x >= start & chrLoess$x <= end &
-                             !is.na(chrLoess$fitted)],
-                end)
-    shadeY <- c(-5,
-                chrLoess$fitted[chrLoess$x >= start & chrLoess$x <= end &
-                                  !is.na(chrLoess$fitted)],
-                -5)
-    polygon(shadeX/1000000, shadeY, col = '#2ecc71', border = NA)
-    
-    # overlay density curve
-    if (length(densityData) > 0) {
-      posMatch <- (densityData$x >= chrLoess$x[1]) &
-        densityData$x <= chrLoess$x[length(chrLoess$x)]
-      densityData$x <- densityData$x[posMatch]
-      densityData$y <- densityData$y[posMatch]
-      par(new = TRUE)
-      plot(densityData, type = 'l',
-           ylim = c(min(densityData$y, na.rm = TRUE),
-                    1.1*max(densityData$y, na.rm = TRUE)),
-           xlim = c(chrLoess$x[1], tail(chrLoess$x, n = 1)),
-           ann = FALSE, xaxs = 'i',
-           xaxt = 'n', yaxt = 'n', col = '#502ecc')
-      axis(side = 4, col = '#502ecc')
-      mtext(side = 4, line = 2, 'Probability', col = '#502ecc')
-      legend('topright',
-             legend = c("Fitted Distance Curve",
-                        "Peak Resampling Distribution"),
-             col = c("black", "#502ecc"), lty = c(1, 1), cex = 0.8, lwd = 3)
+
+    inside <- chrX >= start & chrX <= end & is.finite(fitted)
+    if (any(inside)) {
+      # [FIX] Shade to the actual plot baseline rather than an arbitrary -5,
+      # which could distort clipping when the plotted range is small/positive.
+      shadeX <- c(start, chrX[inside], end)
+      shadeY <- c(yLim[1], fitted[inside], yLim[1])
+      polygon(shadeX/1000000, shadeY, col = '#2ecc71', border = NA)
     }
-    
-    # SNPs plot
-    if (length(chrLoess) > 0) {
-      plot(chrLoess$x/1000000, chrLoess$y, pch = 16, cex = .6,
-           ylim = c(min(chrLoess$y, na.rm = TRUE),
-                    1.1*max(chrLoess$y, na.rm = TRUE)),
-           ylab = NA,
-           xlab = paste(seqname,"Base Position (MB)"), xaxs = 'i' )
-      mtext(substitute("ED"^p, list(p = mmapprData@param@distancePower)), 
+    cutoff <- mmapprData@peaks[[seqname]]$cutoff
+    if (length(cutoff) == 1L && is.finite(cutoff))
+      abline(h = cutoff, lty = 2, col = "grey")
+
+    # Overlay the resampling density only when finite support remains inside the
+    # plotted chromosome range. Degenerate one-point densities use a point rather
+    # than an invisible zero-length line.
+    if (length(densityData) > 0L && length(densityData$x) > 0L) {
+      dx <- as.numeric(densityData$x)
+      dy <- as.numeric(densityData$y)
+      posMatch <- is.finite(dx) & is.finite(dy) & dx >= min(chrX, na.rm = TRUE) &
+                  dx <= max(chrX, na.rm = TRUE)
+      if (any(posMatch)) {
+        dx <- dx[posMatch]; dy <- dy[posMatch]
+        par(new = TRUE)
+        plot(dx, dy, type = if (length(dx) > 1L) 'l' else 'p',
+             ylim = .safeYLim(dy), xlim = .safeXLim(chrX),
+             ann = FALSE, xaxs = 'i', xaxt = 'n', yaxt = 'n', col = '#502ecc')
+        axis(side = 4, col = '#502ecc')
+        mtext(side = 4, line = 2, 'Density', col = '#502ecc')
+        legend('topright',
+               legend = c("Fitted Distance Curve", "Peak Resampling Distribution"),
+               col = c("black", "#502ecc"), lty = c(1, 1), cex = 0.8, lwd = 3)
+      }
+    }
+
+    if (length(chrX) > 0L) {
+      plot(chrX/1000000, rawY, pch = 16, cex = .6,
+           ylim = .safeYLim(rawY), xlim = xLim,
+           ylab = NA, xlab = paste(seqname, "Base Position (MB)"), xaxs = 'i')
+      mtext(substitute("ED"^p, list(p = mmapprData@param@distancePower)),
             side = 2, line = 2)
     }
   }
-  dev.off()
+  grDevices::dev.off()
+  deviceOpen <- FALSE
+  invisible(NULL)
+}
+
+
+
+# Convert Bioconductor-rich table columns into values that base write.table() can
+# serialize reliably. VariantAnnotation/GenomicRanges metadata can contain List,
+# DNAStringSet, IRanges, or other vector-like columns; base write.table() errors on
+# genuine list columns ("unimplemented type 'list'"). Atomic columns are preserved
+# as-is so numeric depths/frequencies stay numeric in the TSV.
+.tsvSafeDataFrame <- function(x) {
+  df <- as.data.frame(x)
+  # Even a zero-row table can contain a list/List column whose class makes
+  # write.table() fail before it writes the header. Only the truly zero-column
+  # case can bypass column sanitization safely.
+  if (ncol(df) == 0L) return(df)
+
+  sanitizeText <- function(x) {
+    # [FIX/ROBUSTNESS] A literal tab/newline inside an annotation value would
+    # corrupt an unquoted TSV row. GTF-derived labels should not contain these,
+    # but sanitize defensively so output remains one record per line.
+    out <- x
+    ok <- !is.na(out)
+    out[ok] <- gsub("[\t\r\n]+", " ", out[ok])
+    out
+  }
+
+  collapseCell <- function(x) {
+    if (length(x) == 0L) return("")
+    vals <- tryCatch(as.character(x), error = function(e) character())
+    if (length(vals) == 0L) return("")
+    if (all(is.na(vals))) return(NA_character_)
+    paste(sanitizeText(vals[!is.na(vals)]), collapse = ",")
+  }
+
+  for (nm in names(df)) {
+    col <- df[[nm]]
+    if (is.character(col)) {
+      df[[nm]] <- sanitizeText(col)
+      next
+    }
+    # [FIX] Leave ordinary scalar vectors alone; only flatten columns that base
+    # write.table() cannot safely serialize. The [[i]] path is important for
+    # CharacterList/IntegerList/list columns because one table row can contain
+    # multiple annotation values.
+    listLike <- is.list(col) || methods::is(col, "List") || !is.atomic(col)
+    if (!listLike) next
+    df[[nm]] <- vapply(seq_len(nrow(df)), function(i) {
+      cell <- tryCatch(col[[i]], error = function(e) col[i])
+      collapseCell(cell)
+    }, character(1))
+  }
+  df
+}
+
+.writeTsv <- function(x, file) {
+  utils::write.table(.tsvSafeDataFrame(x), file = file, sep = "\t",
+                     quote = FALSE, row.names = FALSE, na = "NA")
+  invisible(file)
+}
+
+
+.originalDetectedMutationTable <- function(x) {
+  df <- as.data.frame(x, stringsAsFactors = FALSE)
+  originalCols <- c("seqnames", "start", "end", "width", "strand",
+                    "ref", "alt", "refDepth", "altDepth", "peakDensity",
+                    "GENEID", "TXID", "PROTEINLOC", "CONSEQUENCE",
+                    "REFAA", "VARAA")
+
+  # Current predictCoding versions do not consistently propagate the query's
+  # standard depth columns, but the frozen object carries equivalent mutant
+  # evidence explicitly. Use it only to reconstruct the historical table fields.
+  if (!"refDepth" %in% names(df) && "mutRefDepth" %in% names(df))
+    df$refDepth <- df$mutRefDepth
+  if (!"altDepth" %in% names(df) && "mutAltDepth" %in% names(df))
+    df$altDepth <- df$mutAltDepth
+
+  # Original MMAPPR2 emitted the first protein-location value for this legacy
+  # table. VariantAnnotation commonly stores PROTEINLOC as an IRanges/S4Vectors
+  # List derivative rather than a base list, so handle both without flattening the
+  # richer annotation retained in the in-memory object.
+  if ("PROTEINLOC" %in% names(df)) {
+    proteinLoc <- df$PROTEINLOC
+    listLike <- is.list(proteinLoc) || methods::is(proteinLoc, "List") || !is.atomic(proteinLoc)
+    if (listLike) {
+      df$PROTEINLOC <- vapply(seq_len(nrow(df)), function(i) {
+        value <- tryCatch(proteinLoc[[i]], error = function(e) proteinLoc[i])
+        value <- tryCatch(as.character(value), error = function(e) character())
+        if (length(value)) value[[1L]] else NA_character_
+      }, character(1))
+    }
+  }
+
+  # Assign a zero-length vector when x has zero rows. Assigning scalar NA to a
+  # zero-row data.frame can otherwise create a replacement-length error instead
+  # of producing the desired header-only legacy table.
+  for (nm in setdiff(originalCols, names(df))) df[[nm]] <- rep(NA, nrow(df))
+  df[, originalCols, drop = FALSE]
 }
 
 
 .writeCandidateTables <- function(candList, outputFolder){
-  for (seqname in names(candList$effects)) {
-    listData <- as.data.frame(candList$effects[[seqname]])
-    filename <- paste0("DetectedMutationsFor", seqname, '.tsv')
-    listData$PROTEINLOC <- sapply(listData$PROTEINLOC, function(x) {x[1]})
-    outdata <- listData[, c("seqnames", "start", "end", "width", "strand", "ref", "alt", "refDepth", "altDepth", "peakDensity", "GENEID", "TXID", "PROTEINLOC", "CONSEQUENCE", "REFAA", "VARAA")]
-    write.table(x = outdata, 
-                file = file.path(outputFolder, filename), 
-                sep = '\t', quote = FALSE, row.names = FALSE)
-    filename <- paste0("DifferentiallyExpressedGenesFor", seqname, '.tsv')
-    write.table(x = candList$diff[[seqname]], 
-                file = file.path(outputFolder, filename), 
-                sep = '\t', quote = FALSE, row.names = FALSE)
+  seqnames <- unique(c(names(candList$snps), names(candList$effects), names(candList$diff)))
+  for (seqname in seqnames) {
+    # [IMPROVE] Always write the full candidate SNV set, including noncoding
+    # variants and the new WT-vs-mutant allele-frequency evidence.
+    if (!is.null(candList$snps[[seqname]])) {
+      .writeTsv(candList$snps[[seqname]],
+                file.path(outputFolder, paste0("AllCandidateVariantsFor", seqname, ".tsv")))
+    }
+
+    if (!is.null(candList$effects[[seqname]])) {
+      # Frozen compatibility surface: preserve the original DetectedMutations
+      # table schema and column order. The richer SNV/WT metadata stays available
+      # in AllCandidateVariantsFor*.tsv and in the returned MmapprData object.
+      .writeTsv(.originalDetectedMutationTable(candList$effects[[seqname]]),
+                file.path(outputFolder, paste0("DetectedMutationsFor", seqname, ".tsv")))
+    }
+
+    if (!is.null(candList$diff[[seqname]])) {
+      .writeTsv(candList$diff[[seqname]],
+                file.path(outputFolder, paste0("DifferentiallyExpressedGenesFor", seqname, ".tsv")))
+    }
   }
 }
+

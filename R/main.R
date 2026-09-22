@@ -2,7 +2,7 @@
 #'
 #' @name mmappr
 #'
-#' @usage MMAPPR2 is designed to map the causative mutation in a forward genetics
+#' MMAPPR2 is designed to map the causative mutation in a forward genetics
 #' screen. It analyzes aligned sequence files, calculates the per-base
 #' Euclidean distance between the mutant and wild-type pools, performs
 #' a Loess regression on that distance, and generates candidate variants
@@ -32,7 +32,7 @@
 #' \dontrun{
 #' ### Alternately, you can navigate the pipeline step by step.
 #' ### This may be helpful for debugging.
-#' md <- MmapprData(mmapprParam)
+#' md <- mmapprData(mmapprParam)
 #' postCalcDistMD <- calculateDistance(md)
 #' postLoessMD <- loessFit(postCalcDistMD)
 #' postPrePeakMD <- prePeak(postLoessMD)
@@ -53,12 +53,13 @@ mmappr <- function(mmapprParam) {
     message("-------- Welcome to MMAPPR2 --------")
     message("------------------------------------\n")
 
-    .checkDep('samtools')
-
+    # [FIX] The current implementation uses Rsamtools for BAM pileup and no
+    # longer requires an external samtools executable at startup. The old check
+    # was stale and could reject an otherwise valid Bioconductor installation.
     md <- mmapprData(mmapprParam)
     oF <- outputFolder(md@param)
     .messageAndLog(paste('Start time:', Sys.time()), oF)
-    .messageAndLog(paste('Output folder:', file.path(getwd(), oF), '\n'), oF)
+    .messageAndLog(paste('Output folder:', oF, '\n'), oF)
     .log('Parameters:', oF)
     .log(mmapprParam, oF)
     .log('', oF)
@@ -71,7 +72,7 @@ mmappr <- function(mmapprParam) {
         .messageAndLog("Identifying chromosome(s) harboring linkage region...", oF)
         md <- prePeak(md)
         if (length(peaks(md)) > 0)
-            .messageAndLog("Peak regions succesfully identified", oF)
+            .messageAndLog("Peak regions successfully identified", oF)
         else stop("No peak regions identified")
         .messageAndLog("Refining peak characterization using SNP resampling...", oF)
         md <- peakRefinement(md)
@@ -94,7 +95,7 @@ mmappr <- function(mmapprParam) {
     endTime <- Sys.time()
     .messageAndLog(paste('\nEnd time:', endTime), oF)
     .messageAndLog(paste("MMAPPR2 runtime:", format(endTime - startTime)), oF)
-    saveRDS(md, file.path(md@param@outputFolder, "mmappr_data.RDS"))
+    .atomicSaveRDS(md, file.path(md@param@outputFolder, "mmappr_data.RDS"))
     .log('\nsessionInfo()', oF)
     .log(sessionInfo(), oF)
 
@@ -118,10 +119,6 @@ mmappr <- function(mmapprParam) {
 }
 
 
-.checkDep <- function(program) {
-    if (Sys.which(program) == '' || is.null(Sys.which(program))) {
-        stop(paste(program, 'dependency is not installed (or at least not in path).'))
-    } else {
-        return(TRUE)
-    }
-}
+# [FIX] The former .checkDep('samtools') helper was removed. The revised current
+# implementation performs BAM pileups through Rsamtools and no longer shells out
+# to samtools, so requiring an unrelated executable was a stale startup failure.
