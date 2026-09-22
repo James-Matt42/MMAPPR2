@@ -114,6 +114,11 @@ setMethod("peaks", "MmapprData", function(obj) obj@peaks)
 setMethod("candidates", "MmapprData", function(obj) obj@candidates)
 #' @rdname MmapprData-functions
 #' @export
+# [CHANGE — PARAMETER REPLACEMENT INVALIDATES DERIVED STATE]
+# In the old implementation, replacing MmapprData@param could leave distances, peaks, and
+# candidates computed under the old parameters attached to the object. The new implementation warns
+# and clears those dependent slots whenever a parameter replacement occurs after
+# derived results exist, preventing a mixed-state analysis object.
 setMethod("param<-", "MmapprData",
           function(obj, value) {
             if (!is(value, "MmapprParam")) stop("param must be a MmapprParam object")
@@ -179,5 +184,7 @@ setMethod("show", "MmapprData", function(object) {
 })
 
 
-# [FIX] .getPileup() used to be duplicated here and in distance.R.
-# The duplicate was removed so there is one authoritative implementation.
+# [CHANGE — ONE AUTHORITATIVE PILEUP IMPLEMENTATION]
+# The old implementation duplicated .getPileup() in this file and distance.R. The new implementation removes
+# this copy so RNA-seq CIGAR handling, read filters, pileup limits, and base-column
+# fixes cannot diverge between two implementations.

@@ -13,6 +13,11 @@ NULL
 # the symbols that are intentionally resolved inside data.table expressions.
 # This does not create or modify runtime variables; it removes false-positive
 # "no visible binding" notes while keeping the NSE usage explicit.
+# [CHANGE — R-CHECK/NSE DECLARATIONS]
+# The new implementation explicitly declares the data.table non-standard-evaluation symbols used by
+# the expanded linkage, candidate, annotation, and preflight code. The old implementation
+# had no globalVariables declaration, which could produce false-positive R CMD
+# check notes. This declaration affects static checking only, not runtime values.
 utils::globalVariables(c(
   ".", ".I", "..bases", "..wtFreqCols", ".row_id",
   "A", "C", "G", "T", "A.FREQ", "C.FREQ", "G.FREQ", "T.FREQ",
@@ -24,6 +29,11 @@ utils::globalVariables(c(
   "totalDepth", "type"
 ))
 
+# [CHANGE — DEPENDENCY/API MODERNIZATION]
+# The old implementation imported VariantTools for variant calling and GenomicFeatures for TxDb
+# construction. The new implementation removes the VariantTools dependency, imports txdbmaker for
+# GTF/GFF -> TxDb construction, and imports the VariantAnnotation/stats symbols used directly by
+# the rewritten candidate and peak code.
 #' @import BiocParallel
 #' @import data.table
 #' @import GenomeInfoDb

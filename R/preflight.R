@@ -1,9 +1,13 @@
-# Frozen-branch input concordance checks -----------------------------------------
+# Cross-resource input concordance checks ----------------------------------------
 #
 # These checks intentionally stay small: no execution state, checkpoints, cached
 # provenance, or alternate analysis modes. They run during mmapprParam()
 # construction before an existing output directory can be cleared.
 
+# [CHANGE — NEW CROSS-RESOURCE PREFLIGHT LAYER]
+# The old implementation validated resources mostly in isolation and could prepare/clear output before
+# proving that BAM headers, FASTA sequence dictionaries, and annotation coordinates belonged to the same
+# reference build. The new preflight layer establishes that cross-resource contract first.
 .bamSeqinfoFrozen <- function(bam) {
     header <- Rsamtools::scanBamHeader(bam)
     entry <- if (length(header) == 1L && is.list(header[[1]]) &&
@@ -17,6 +21,10 @@
 
 # Apply a naming-style translation while muffling only GenomeInfoDb's harmless
 # "more than one best map" warning. Exact-name comparison remains the fallback.
+# [CHANGE — CONTROLLED SEQNAME-STYLE CONVERSION]
+# The old code performed direct seqlevelsStyle assignments at individual call sites. The new helper
+# centralizes those conversions and muffles only the known ambiguous-renaming warning; unrelated
+# warnings remain visible.
 .setSeqlevelsStyleFrozen <- function(x, style) {
     if (length(style) != 1L || is.na(style) || !nzchar(style)) return(x)
     withCallingHandlers({
@@ -28,6 +36,10 @@
     })
 }
 
+# [CHANGE — ANNOTATION-LIKE SEQINFO HARMONIZATION]
+# The old implementation had ad-hoc style conversion at individual call sites. The new implementation may
+# harmonize annotation-like sequence metadata to the FASTA style when a reliable
+# style hint exists, while retaining exact names when style inference is unavailable.
 .harmonizeSeqinfoFrozen <- function(si, refSi) {
     targetStyle <- .choose_target_style(refSi)
     if (!is.na(targetStyle)) {
@@ -38,6 +50,11 @@
     si
 }
 
+# [CHANGE — EXACT SHARED BAM/FASTA CONTIG MATCHING]
+# The old implementation did not compare BAM headers with the reference FASTA before analysis. Because
+# BAM contig names cannot be renamed for Rsamtools queries, the new preflight requires at least one exact
+# shared contig name and matching lengths for shared contigs, and rejects style-only matches such as
+# `1` versus `chr1`.
 .compareBamSeqinfoFrozen <- function(label, si, refSi) {
     # BAM queries are issued with reference/annotation GRanges. Unlike annotation
     # ranges, a BAM header cannot be renamed in memory before scanBam()/pileup().
@@ -73,6 +90,10 @@
 # Read only the three annotation fields needed for reference-concordance checks.
 # fread is much lighter than constructing a TxDb. If a compressed/atypical GFF
 # cannot be read this way, rtracklayer is used as the compatibility fallback.
+# [CHANGE — LIGHTWEIGHT ANNOTATION COORDINATE SCAN]
+# The old implementation had no annotation-coordinate preflight. The new code reads only seqname/start/end
+# for validation, falling back to rtracklayer when needed, so malformed or out-of-reference coordinates
+# are detected without constructing a TxDb solely for input checking.
 .annotationObservedRanges <- function(path) {
     tab <- tryCatch(
         data.table::fread(path, sep = "\t", header = FALSE,
@@ -108,6 +129,10 @@
     )[, .(max_end = max(end)), by = seqname]
 }
 
+# [CHANGE — ANNOTATION/FASTA BOUNDS VALIDATION]
+# After safe seqname harmonization, the new implementation verifies that the maximum observed
+# annotation coordinate on every shared sequence fits inside the indexed FASTA.
+# The old implementation did not perform this build-level bounds check before analysis.
 .checkAnnotationAgainstReferenceFrozen <- function(path, refSi) {
     obs <- .annotationObservedRanges(path)
     annSi <- GenomeInfoDb::Seqinfo(seqnames = obs$seqname,
@@ -136,6 +161,10 @@
     common
 }
 
+# [CHANGE — ONE BUILD-CONCORDANCE GATE]
+# The old constructor/setters had no single build-concordance gate. The new implementation routes
+# construction and resource replacement through one check requiring every BAM to agree with the FASTA,
+# WT and mutant pools to share reference sequence(s), and annotation coordinates to fit that FASTA.
 .preflightInputResourcesFrozen <- function(wt, mut, ref, annotationPath) {
     refSi <- .faSeqinfo(ref)
     if (!length(refSi)) stop("Reference FASTA contains no indexed sequences")

@@ -1,5 +1,4 @@
-# Maintained manually in this maintenance revision; regenerate with roxygen2
-# before an upstream release to keep generated metadata synchronized.
+# Maintained manually; regenerate with roxygen2 whenever roxygen metadata changes.
 export(calculateDistance)
 export(generateCandidates)
 export(loessFit)
@@ -41,6 +40,10 @@ exportMethods(loessOptResolution)
 exportMethods("loessOptResolution<-")
 exportMethods(loessOptCutFactor)
 exportMethods("loessOptCutFactor<-")
+# [CHANGE — PACKAGE EXPORT/DEPENDENCY SURFACE]
+# The old package surface exposed only the earlier parameter API and VariantTools-era imports.
+# The new package surface exports the added analysis-setting accessors/replacements and imports
+# the direct Bioconductor APIs used by candidate calling, annotation, and peak processing.
 exportMethods(maxPileupDepth)
 exportMethods("maxPileupDepth<-")
 exportMethods(candidateMinDepth)

@@ -26,6 +26,10 @@
 #' 
 #' @export
 
+# [CHANGE — NAMESPACE-STABLE PARALLEL LOESS]
+# The old implementation called unqualified `bplapply`, relying on the symbol being attached/imported.
+# The new implementation calls BiocParallel::bplapply explicitly and routes each chromosome through the
+# hardened optimizer below.
 loessFit <- function(mmapprData) {
     loessOptResolution <- mmapprData@param@loessOptResolution
     loessOptCutFactor <- mmapprData@param@loessOptCutFactor
@@ -42,6 +46,10 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — LOESS FIT FAILURES BECOME OPTIMIZER DATA]
+# The old implementation let many invalid/degenerate LOESS fits propagate as errors or
+# non-finite AICc values. The new implementation wraps fitting so a bad span can be scored as failed
+# and skipped without aborting the whole chromosome search.
 .getLoess <- function(s, pos, eucDist, ...){
     suppressWarnings(try(stats::loess(eucDist ~ pos,
                                       span = s,
@@ -51,6 +59,9 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — BOUNDARY-SAFE LOCAL SEARCH RESOLUTION]
+# The old helper indexed diff() on both sides of a span and could step outside the vector at an
+# endpoint. The new helper checks available neighbors explicitly and returns a safe spacing value.
 .localResolution <- function(spans, span) {
     spans <- unique(sort(spans[is.finite(spans)]))
     index <- match(span, spans)
@@ -62,7 +73,12 @@ loessFit <- function(mmapprData) {
 }
 
 
-# [IMPROVE] Coarse-to-fine AICc search with cached span evaluations. The former
+# [CHANGE — AICC OPTIMIZER REWRITE]
+# The old implementation's recursive search could evaluate the same span repeatedly and behaved
+# poorly when fits were all invalid. The new implementation caches evaluated spans, performs an
+# iterative coarse-to-fine search, handles an all-failed search explicitly, and
+# adds an iteration cap. The objective remains AICc minimization.
+# [IMPROVE] Coarse-to-fine AICc search with cached span evaluations. The old
 # recursive implementation could refit the same span multiple times and handled
 # all-NA fits poorly. This retains the same basic search idea while making failure
 # explicit and avoiding duplicate LOESS work.
@@ -126,6 +142,10 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — FINITE/BOUNDARY-SAFE LOCAL MINIMA]
+# The old helper returned minimum values from a diff-based expression, making repeated values, endpoints,
+# and non-finite AICc entries fragile to match back to spans. The new helper returns indices directly,
+# ignores non-finite values, and handles endpoint/repeated-extrema cases explicitly.
 .localMinIndices <- function(x) {
     if (!length(x)) return(integer())
     out <- integer()
@@ -140,6 +160,9 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — ROBUST NUMERIC RESOLUTION PARSING]
+# The old helper inferred decimal places by applying string operations directly to the numeric value,
+# which is fragile for scientific notation. The new helper formats a stable non-scientific string first.
 .numDecimals <- function(x) {
     stopifnot(is.numeric(x), length(x) == 1L, is.finite(x), x > 0)
     txt <- format(x, scientific = FALSE, trim = TRUE, digits = 15)
@@ -148,6 +171,9 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — DEGENERATE AICC GUARDS]
+# The old AICc helper could return Inf/NaN for failed fits, zero residual variance, or a non-positive
+# denominator. The new helper returns NA for those spans so the optimizer can exclude them explicitly.
 .aicc <- function(s, eucDist, pos) {
     x <- .getLoess(s, pos, eucDist)
     if (inherits(x, "try-error")) return(NA_real_)
@@ -162,6 +188,10 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — DETERMINISTIC TIED-SPAN SELECTION]
+# The old implementation could average tied optimum spans and return a span whose AICc had
+# never actually been evaluated. The new implementation resolves floating-point ties to an evaluated
+# span deterministically (choosing the smaller symmetric optimum).
 .chooseBestAiccSpan <- function(aiccTable, resolution) {
     finite <- aiccTable[is.finite(aiccTable$aiccValues), , drop = FALSE]
     if (nrow(finite) == 0L) stop("No finite AICc values were produced")
@@ -184,6 +214,10 @@ loessFit <- function(mmapprData) {
 }
 
 
+# [CHANGE — CHROMOSOME-LEVEL LOESS HARDENING]
+# The old chromosome wrapper attempted optimization without an explicit minimum-row check, did not record
+# the chosen span separately, and did not verify that the final fit was a valid loess object. The new
+# wrapper adds those checks/metadata and returns an explicit chromosome-level diagnostic on failure.
 .loessFitForChr <- function(resultList, loessOptResolution, loessOptCutFactor){
     startTime <- proc.time()
     tryCatch({

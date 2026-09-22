@@ -393,7 +393,7 @@ uncompressed or shell-processed.</p>
 )</code></pre>
 </div>
 <div id="important-defaults-added-or-made-explicit-in-this-revision" class="section level1">
-<h1>Important defaults added or made explicit in this revision</h1>
+<h1>Important defaults and explicit controls</h1>
 <pre class="r"><code>param &lt;- mmapprParam(
   wtFiles = &quot;wt_pool.bam&quot;,
   mutFiles = &quot;mutant_pool.bam&quot;,
@@ -407,11 +407,11 @@ uncompressed or shell-processed.</p>
   candidateMinAltDepth = 2,
   candidateMinAltFreq = 0.80,
   # These WT-specific hard filters are optional by default. WT evidence is
-  # still reported for every candidate but does not change frozen default ranking.
+  # still reported for every candidate but does not change the default candidate ordering.
   candidateMaxWtAltFreq = 1.00,
   candidateMinDeltaAF = 0.00,
   peakCutoffSd = 3,
-  # Compatibility-safe default: preserve the supplied main-branch cutoff.
+  # Default: use the old cutoff calculation; &quot;global_sd&quot; selects the new alternative.
   peakCutoffMethod = &quot;legacy_current&quot;,
   peakIntervalWidth = 0.80,
   # Conservative default: span all selected high-density modes.
@@ -492,7 +492,7 @@ where observable, but only coding SNV effects receive
 <code>predictCoding()</code> annotations;</li>
 <li>the expression summary is descriptive rather than inferential.</li>
 </ul>
-<p>See <code>IMPLEMENTED_CHANGES.md</code> for a detailed
+<p>See <code>CHANGE_ANNOTATION_INDEX.md</code> for a detailed
 maintenance/change log and the distinction between fixed bugs and larger
 methodological work.</p>
 </div>

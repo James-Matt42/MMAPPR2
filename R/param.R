@@ -12,7 +12,7 @@
 #'   \code{\link[Rsamtools]{BamFile}}, or
 #'   \code{\link[Rsamtools]{BamFileList}} containing
 #'   BAM files for the mutant pool to be analyzed.
-#' @slot refFasta The path to the fasta file genome.
+#' @slot refFasta The path to the reference FASTA file.
 #' @slot gtf The path to a gtf-formatted annotation file. 
 #' @slot outputFolder Length-one character vector specifying where to save
 #'   output, including a \code{\linkS4class{MmapprData}} stored as
@@ -44,7 +44,7 @@
 #'   When 'weighted', allele frequencies are weighted by read depth (pooled-read
 #'   behavior). When 'simple', replicate allele frequencies are weighted equally
 #'   while coverage is averaged across all supplied files.
-#' @slot distancePower Length-one numeric vector determing to what power
+#' @slot distancePower Length-one numeric vector determining to what power
 #'   Euclidean distance values are raised before fitting. Higher powers tend
 #'   to increase high values and decrease low values, exaggerating the
 #'   variation in the data. Default of 4.
@@ -64,28 +64,31 @@
 #'   different spans at intervals of \code{0.001} would be evaluated after
 #'   intervals of \code{0.01}.
 #' @slot maxPileupDepth Maximum reads considered per BAM at one pileup position.
-#' @slot candidateMinDepth Optional pooled mutant depth floor for final candidates. The frozen default (1) is effectively inert given the two-ALT-read rule, matching original MMAPPR2 behavior.
+#' @slot candidateMinDepth Optional pooled mutant depth floor for final candidates. The default (1) is effectively inert given the two-ALT-read rule, preserving the old effective candidate-depth behavior.
 #' @slot candidateMinAltDepth Minimum pooled mutant reads supporting the alternative allele.
-#' @slot candidateMinAltFreq Minimum mutant alternative-allele frequency for a candidate.
+#' @slot candidateMinAltFreq Strict lower bound on mutant alternative-allele frequency for a candidate; the observed frequency must be greater than this value.
 #' @slot candidateMaxWtAltFreq Optional maximum WT alternative-allele frequency; 1 disables the filter.
 #' @slot candidateMinDeltaAF Optional minimum mutant-minus-WT allele-frequency difference; 0 disables the filter.
 #' @slot peakCutoffSd Multiplier applied to the variability term used for initial peak detection.
-#' @slot peakCutoffMethod Peak-threshold calculation: 'legacy_current' preserves the supplied main-branch behavior; 'global_sd' uses the median plus a genome-wide SD multiple.
+#' @slot peakCutoffMethod Peak-threshold calculation: 'legacy_current' uses the old mean-of-chromosome-means plus sqrt(sum(var/n)) formula; 'global_sd' uses the median plus a genome-wide SD multiple.
 #' @slot peakIntervalMethod Refined-interval strategy: 'hpd_span' conservatively spans all high-density modes; 'shortest_contiguous' selects the shortest single interval with the requested mass.
 #' @slot peakResampleIterations Number of half-marker LOESS resamples used for peak refinement.
 #' @slot randomSeed Base seed used to make peak resampling reproducible.
 #' @slot pairedEnd Whether RNA-seq reads should be counted as paired-end fragments in the descriptive expression summary.
-#' @slot ignoreStrand Whether strand should be ignored in the descriptive expression summary. FALSE preserves the original strand-aware default.
-#' @slot expressionPseudocount Optional positive pseudocount for the descriptive log2 fold change. The frozen default is 0, preserving original raw-count semantics.
+#' @slot ignoreStrand Whether strand should be ignored in the descriptive expression summary. FALSE preserves the old implementation's strand-aware default.
+#' @slot expressionPseudocount Optional positive pseudocount for the descriptive log2 fold change. The default is 0, preserving the old raw-count behavior.
 #' @slot refGenome An indexed \code{\link[Rsamtools]{FaFile}} generated
 #'   internally from refFasta.
 #' @rdname MmapprParam
 #' 
 NULL
 
-# Frozen compatibility constant: the supplied original candidate pileup relied on
-# Rsamtools' historical default max_depth of 250. Keep it separate from the
-# linkage-stage maxPileupDepth tuning parameter so one cannot drift into the other.
+# The old candidate path relied on Rsamtools' implicit max_depth=250. Keep that
+# candidate-stage value separate from the configurable linkage maxPileupDepth setting.
+# [CHANGE — CANDIDATE PILEUP CAP NAMED EXPLICITLY]
+# The new implementation records 250 as a dedicated candidate-stage constant. In the new in-memory
+# pooling path this cap is applied per mutant BAM, whereas the old multi-BAM path applied the implicit
+# cap after merging BAMs; the linkage-stage depth setting remains independent.
 .FROZEN_CANDIDATE_MAX_DEPTH <- 250L
 
 setClass("MmapprParam",
@@ -106,7 +109,10 @@ setClass("MmapprParam",
            peakIntervalWidth = "numeric",
            loessOptResolution = "numeric",
            loessOptCutFactor = "numeric",
-           # [IMPROVE] Formerly hard-coded analysis choices are now stored explicitly.
+           # [CHANGE — RECORDED ANALYSIS SETTINGS]
+           # The old implementation hard-coded these linkage/candidate/peak/RNG/expression
+           # choices inside pipeline functions. The new implementation stores them as slots in
+           # MmapprParam so the complete run configuration is serialized with the analysis.
            maxPileupDepth = "numeric",
            candidateMinDepth = "numeric",
            candidateMinAltDepth = "numeric",
@@ -140,7 +146,7 @@ setClass("MmapprParam",
 #'   \code{\link[Rsamtools]{BamFile}}, or
 #'   \code{\link[Rsamtools]{BamFileList}} containing
 #'   BAM files for the mutant pool to be analyzed.
-#' @param refFasta The path to the fasta file genome.
+#' @param refFasta The path to the reference FASTA file.
 #' @param gtf The path to a gtf-formatted annotation file. 
 #' @param outputFolder Length-one character vector specifying where to save
 #'   output, including a \code{\linkS4class{MmapprData}} stored as
@@ -172,7 +178,7 @@ setClass("MmapprParam",
 #'   When 'weighted', allele frequencies are weighted by read depth (pooled-read
 #'   behavior). When 'simple', replicate allele frequencies are weighted equally
 #'   while coverage is averaged across all supplied files.
-#' @param distancePower Length-one numeric vector determing to what power
+#' @param distancePower Length-one numeric vector determining to what power
 #'   Euclidean distance values are raised before fitting. Higher powers tend
 #'   to increase high values and decrease low values, exaggerating the
 #'   variation in the data. Default of 4.
@@ -191,25 +197,24 @@ setClass("MmapprParam",
 #'   optimization algorithm proceeds. For example, with a default of \code{0.1}
 #'   different spans at intervals of \code{0.001} would be evaluated after
 #'   intervals of \code{0.01}.
-#' @param maxPileupDepth Maximum reads considered at one linkage-stage pileup position. Defaults to 1000; final candidate pileup retains the historical 250-read cap.
-#' @param candidateMinDepth Optional total mutant depth floor for a final candidate. Defaults to 1, preserving the original effective rule of two ALT reads plus >80% ALT frequency.
+#' @param maxPileupDepth Maximum reads considered at one linkage-stage pileup position. Defaults to 1000; candidate-stage pileup uses a separate explicit cap of 250 reads per mutant BAM.
+#' @param candidateMinDepth Optional total mutant depth floor for a final candidate. Defaults to 1, preserving the old implementation's effective rule of two ALT reads plus >80% ALT frequency.
 #' @param candidateMinAltDepth Minimum mutant reads supporting the alternative allele; defaults to 2.
-#' @param candidateMinAltFreq Minimum mutant alternative-allele frequency; defaults to 0.80.
+#' @param candidateMinAltFreq Strict lower bound on mutant alternative-allele frequency; candidates must be greater than this value. Defaults to 0.80.
 #' @param candidateMaxWtAltFreq Optional maximum WT alternative-allele frequency. Default 1 disables this filter.
 #' @param candidateMinDeltaAF Optional minimum mutant-minus-WT alternative-allele-frequency difference. Default 0 disables this filter.
 #' @param peakCutoffSd Multiplier applied to the selected peak-cutoff spread term. Defaults to 3.
 #' @param peakCutoffMethod Initial peak-threshold method. \code{legacy_current}
-#'   preserves the supplied main-branch mean-of-chromosome-means plus
-#'   \code{sqrt(sum(var/n))} behavior; \code{global_sd} uses a genome-wide median
-#'   plus an ordinary SD multiple.
+#'   uses the old mean-of-chromosome-means plus \code{sqrt(sum(var/n))} formula;
+#'   \code{global_sd} uses a genome-wide median plus an ordinary SD multiple.
 #' @param peakIntervalMethod Refined interval method. \code{hpd_span} (default)
 #'   spans all high-density KDE grid points needed to reach the requested mass;
 #'   \code{shortest_contiguous} chooses the narrowest single interval containing it.
 #' @param peakResampleIterations Number of half-marker LOESS resamples used in peak refinement. Defaults to 1000.
 #' @param randomSeed Base seed used to make peak refinement reproducible.
 #' @param pairedEnd Logical indicating paired-end RNA-seq for the descriptive expression summary.
-#' @param ignoreStrand Logical indicating whether strand is ignored in the descriptive expression summary. Defaults to FALSE to preserve original summarizeOverlaps semantics.
-#' @param expressionPseudocount Optional pseudocount for descriptive log2 fold change. Default 0 preserves the original raw-count ratio; positive values opt into the 9007 behavior.
+#' @param ignoreStrand Logical indicating whether strand is ignored in the descriptive expression summary. Defaults to FALSE to preserve old summarizeOverlaps semantics.
+#' @param expressionPseudocount Optional pseudocount for descriptive log2 fold change. Default 0 preserves the old implementation's raw-count ratio; positive values explicitly add a pseudocount before the ratio.
 #' @param overwrite Logical. If TRUE, an existing non-empty output folder may be cleared explicitly.
 #' @return A \code{MmapprParam} object.
 #' @export
@@ -225,6 +230,15 @@ setClass("MmapprParam",
 #' 
 NULL
 
+# [CHANGE — CONSTRUCTOR VALIDATION/REPRODUCIBILITY REWRITE]
+# The old constructor handled some documented BAM input types inconsistently. The new implementation normalizes them,
+# validates scalar/cross-parameter rules before destructive filesystem work, creates
+# or refreshes BAM/FASTA indexes before use, deeply validates BAM/index readability,
+# preflights BAM/FASTA/annotation build concordance, makes overwrite noninteractive
+# and explicit, stops destructively gunzipping/shell-parsing annotation input, and
+# records analysis controls that the old implementation hard-coded. Defaults intentionally preserve the
+# old strict >80% candidate rule, the numeric 250-read candidate cap (now applied per mutant BAM before
+# pooling), strand-aware expression counting, and the raw zero-pseudocount expression ratio.
 mmapprParam <- function(wtFiles,
                         mutFiles,
                         refFasta,
@@ -256,7 +270,7 @@ mmapprParam <- function(wtFiles,
                         expressionPseudocount = 0,
                         overwrite = FALSE) {
 
-    # [FIX] The previous constructor documented BamFile/BamFileList support but
+    # [FIX] The old constructor documented BamFile/BamFileList support but
     # immediately called normalizePath(), which only works naturally on character
     # paths. Normalize all accepted BAM input forms through one helper first.
     wtPaths <- .asBamPaths(wtFiles)
@@ -307,6 +321,11 @@ mmapprParam <- function(wtFiles,
     if (anyDuplicated(wtPaths)) warning("Duplicate wild-type BAM path(s) supplied; they will be counted repeatedly")
     if (anyDuplicated(mutPaths)) warning("Duplicate mutant BAM path(s) supplied; they will be counted repeatedly")
 
+    # [CHANGE — VALIDATE INPUTS BEFORE OUTPUT DELETION]
+    # BAM/index and FASTA/index preparation now occurs before output-folder clearing,
+    # so corrupt or unusable sequence inputs cannot destroy existing results first.
+    # The new implementation also requires indexes to be nonempty and at least as new as their data
+    # files rather than accepting a sidecar merely because it exists.
     # [FIX/ROBUSTNESS] Validate/index sequence inputs BEFORE an explicit overwrite
     # is allowed to clear an existing results directory. A corrupt BAM/BAI or FASTA
     # should never destroy prior output and only then report that the new run cannot
@@ -331,8 +350,12 @@ mmapprParam <- function(wtFiles,
     }, error = function(e) e$message)
     if (!isTRUE(fastaCheck)) stop("Reference FASTA/index is unreadable: ", fastaCheck)
 
-    # Frozen 9008: reject wrong-build BAM/reference or annotation/reference
+    # New safety rule: reject wrong-build BAM/reference or annotation/reference
     # combinations before overwrite=TRUE is allowed to clear prior results.
+    # [CHANGE — BUILD PREFLIGHT BEFORE OVERWRITE]
+    # The old constructor prepared the output folder before proving cross-resource build concordance.
+    # The new constructor preflights BAM/FASTA/annotation compatibility before .prepareOutputFolder(),
+    # so a wrong build or out-of-bounds annotation cannot clear an existing result directory first.
     .preflightInputResourcesFrozen(wtFiles, mutFiles, refGenome, gtf)
 
     if (outputFolder == 'DEFAULT') outputFolder <- .defaultOutputFolder()
@@ -342,8 +365,8 @@ mmapprParam <- function(wtFiles,
     outputFolder <- .prepareOutputFolder(outputFolder, overwrite = overwrite)
 
     # [FIX] The old code destructively gunzipped the user's GTF and depended on
-    # shell grep/sort/bgzip. Current Bioconductor annotation readers accept the
-    # original file directly, so preserve the user's input untouched.
+    # shell grep/sort/bgzip. The new Bioconductor annotation readers accept the
+    # input file directly, so preserve the user's annotation untouched.
 
     param <- new("MmapprParam",
                  wtFiles = wtFiles,
@@ -396,6 +419,12 @@ mmapprParam <- function(wtFiles,
     TRUE
 }
 
+# [CHANGE — CENTRAL SCALAR/CROSS-PARAMETER VALIDATION]
+# The old implementation accepted many invalid scalar values until much later. The new implementation validates
+# types/ranges and impossible combinations in one helper before I/O, including open
+# upper-bound ALT frequency (<1), nonnegative pseudocount, minimum depth versus
+# linkage capacity, and candidate depth/ALT depth versus the fixed 250 reads per
+# mutant BAM candidate capacity.
 .validateScalarValues <- function(includeScaffolds, minDepth, homozygoteCutoff,
                                   minBaseQuality, minMapQuality, fileAggregation,
                                   distancePower, peakIntervalWidth, loessOptResolution,
@@ -435,7 +464,7 @@ mmapprParam <- function(wtFiles,
     # [IMPROVE] Catch parameter combinations that guarantee an empty result.
     if (.scalarNumeric(minDepth, 1, integerish = TRUE) && .scalarNumeric(maxPileupDepth, 1, integerish = TRUE))
         add(minDepth <= maxPileupDepth, "minDepth cannot exceed maxPileupDepth (no mapping position could pass)")
-    # Candidate pileup intentionally preserves the original Rsamtools cap of 250
+    # Candidate pileup uses an explicit Rsamtools cap of 250 reads per mutant BAM
     # reads per BAM. maxPileupDepth controls the linkage stage only.
     if (.scalarNumeric(candidateMinDepth, 1, integerish = TRUE) &&
         .scalarNumeric(nMutFiles, 1, integerish = TRUE))
@@ -446,6 +475,10 @@ mmapprParam <- function(wtFiles,
     errors
 }
 
+# [CHANGE — WHOLE-OBJECT S4 CONSISTENCY]
+# The old validity path checked mainly FASTA/BAM existence. The new validity path also checks resource
+# shapes, refFasta/refGenome synchronization, BAM pools, and every scalar setting. Deep BAM/header/index
+# validation remains optional so scalar-only setters do not rescan large input resources.
 .validMmapprParam <- function(param, deepBam = FALSE) {
     errors <- character()
     add <- function(ok, msg) if (!isTRUE(ok)) errors <<- c(errors, msg)
@@ -488,11 +521,13 @@ mmapprParam <- function(wtFiles,
 # constructor/resource-setter checks so ordinary scalar validation stays cheap.
 setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = FALSE))
 
+# [CHANGE — EXPLICIT FASTA PATH SHAPE VALIDATION]
+# The old helper assumed a usable length-one path, so empty or multi-value inputs could fail with generic
+# condition-length errors. The new helper validates type, length, NA, and empty-string cases explicitly
+# before filesystem access and returns a concrete diagnostic.
 .validFastaFile <- function(filepath) {
-    # [FIX/R-VALIDATED] `paste(character(0), ...)` is also character(0), so the
-    # previous implementation accidentally treated an empty FASTA path as valid.
-    # Validate shape/content before touching the filesystem and always return a
-    # concrete diagnostic for malformed input.
+    # Validate path shape/content before touching the filesystem so malformed
+    # inputs produce a stable diagnostic instead of an incidental `if()` error.
     if (!is.character(filepath) || length(filepath) != 1L ||
         is.na(filepath) || !nzchar(filepath))
         return("refFasta must name one existing FASTA file")
@@ -501,6 +536,10 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
     TRUE
 }
 
+# [CHANGE — BAM/INDEX READABILITY VALIDATION]
+# The old implementation mostly checked names/existence. During construction or resource
+# replacement, the new implementation can open BAM headers and indexes so corrupt/incompatible BAM/BAI
+# pairs fail before analysis.
 .validBamFiles <- function(files, deep = FALSE) {
     errors <- character()
     if (!is(files, 'BamFileList')) return("Input is not a BamFileList object")
@@ -531,6 +570,10 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
     if (length(errors) == 0L) TRUE else errors
 }
 
+# [CHANGE — DOCUMENTED BAM INPUT TYPES NORMALIZED]
+# The old constructor documented character/BamFile/BamFileList inputs but
+# effectively assumed character paths in several operations. The new implementation normalizes each
+# supported type to paths before path/index handling.
 .asBamPaths <- function(x) {
     if (is(x, "BamFileList")) {
         if (length(x) == 0L) stop("At least one BAM file is required")
@@ -544,6 +587,9 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
 # A sidecar index is reusable only when it exists, is non-empty, and is not
 # older than the file it indexes. This avoids silently trusting a stale .bai/.fai
 # after a BAM or FASTA has been replaced in place.
+# [CHANGE — STALE/EMPTY INDEX DETECTION]
+# The old code treated an existing sidecar index as sufficient. The new code requires .bai/.fai files
+# to be nonempty and at least as new as their BAM/FASTA data file; otherwise the index is rebuilt.
 .indexIsCurrent <- function(dataPath, indexPath) {
     if (!file.exists(dataPath) || !file.exists(indexPath)) return(FALSE)
     di <- file.info(dataPath)
@@ -554,15 +600,18 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
 }
 
 # Index BAMs without relying on a loose filename regex.
+# [CHANGE — SAFE BAM INDEX DISCOVERY/CONSTRUCTION]
+# The old index search used a broad filename pattern and then reused the first match. The new code checks
+# the two valid sibling .bai names explicitly, rejects stale/empty indexes, builds BamFile objects with
+# their actual index paths, and constructs BamFileList from those objects.
 .indexBamFileList <- function(bfl, oF = NULL) {
     emit <- function(msg) {
         if (is.null(oF)) message(msg) else .messageAndLog(msg, oF)
     }
     indexed_bfl <- lapply(bfl, function(bam_file) {
-        # [FIX] Only construct the sibling `sample.bai` spelling when the input
-        # actually ends in `.bam`. Previously sub() returned the unchanged BAM
-        # path for other filenames, allowing the BAM itself to be mistaken for its
-        # index merely because it existed.
+        # [FIX] Check only the two standard sibling index spellings. The old
+        # implementation searched with a broad basename-based `.*bai$` pattern,
+        # which could select a similarly named but unrelated index file.
         candidates <- paste0(bam_file, ".bai")
         if (grepl("\\.bam$", bam_file, ignore.case = TRUE)) {
             candidates <- c(candidates, sub("\\.bam$", ".bai", bam_file, ignore.case = TRUE))
@@ -588,6 +637,9 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
 }
 
 # Common sequence helpers used by mapping and candidate annotation.
+# [CHANGE — CUSTOM-ASSEMBLY TOLERANCE]
+# The old style helper called seqlevelsStyle() directly and could fail on an unrecognized assembly.
+# The new helper treats style inference as optional and falls back to exact sequence-name matching.
 .choose_target_style <- function(si) {
     # [IMPROVE] Unknown/custom assemblies can make seqlevelsStyle() unable to
     # infer a naming convention. Treat that as "no style hint" and fall back to
@@ -598,6 +650,9 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
     if (length(st)) st[[1]] else NA_character_
 }
 
+# [CHANGE — INDEX-BACKED FASTA SEQUENCE METADATA]
+# The old helper reconstructed Seqinfo from scanFaIndex(). The new helper uses the FaFile seqinfo()
+# method directly, so preflight and annotation code share the indexed FASTA's native sequence metadata.
 .faSeqinfo <- function(fa) {
     # [IMPROVE] FaFile has a seqinfo() method backed directly by the FASTA index;
     # use it rather than reconstructing Seqinfo indirectly from scanFaIndex().
@@ -606,6 +661,9 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
 
 # Close the SQLite connection owned by a transient TxDb. This is a lifecycle
 # fix only; callers materialize all ranges before the connection is closed.
+# [CHANGE — EXPLICIT TXDB CONNECTION CLEANUP]
+# The old code created transient TxDb objects without explicitly closing their SQLite connections.
+# The new code disconnects those transient databases after needed genomic ranges are materialized.
 .disconnectTxDb <- function(txdb) {
     con <- tryCatch(BiocGenerics::dbconn(txdb), error = function(e) NULL)
     if (!is.null(con) && tryCatch(DBI::dbIsValid(con), error = function(e) FALSE))
@@ -613,6 +671,9 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
     invisible(NULL)
 }
 
+# [CHANGE — NARROW TXDB WARNING HANDLING]
+# The old TxDb construction exposed all parser warnings. The new construction path muffles only the
+# known missing-genome-version warning and leaves every other parser/build warning visible.
 .makeTxDbFromAnnotation <- function(path) {
     withCallingHandlers(
         txdbmaker::makeTxDbFromGFF(file = path, format = "auto"),
@@ -624,6 +685,10 @@ setValidity("MmapprParam", function(object) .validMmapprParam(object, deepBam = 
     )
 }
 
+# [CHANGE — BIOCONDUCTOR ANNOTATION PARSING]
+# The old implementation depended on shell decompression/text parsing in multiple paths.
+# The new implementation builds TxDb annotations through txdbmaker's GTF/GFF-aware parser, including
+# compressed inputs, and keeps shell tools out of core annotation construction.
 # [IMPROVE] Build annotation through Bioconductor rather than shell-parsing a GTF.
 .buildTxDb <- function(param) .makeTxDbFromAnnotation(gtf(param))
 
@@ -770,6 +835,10 @@ setMethod("loessOptResolution", "MmapprParam", function(obj) obj@loessOptResolut
 setMethod("loessOptCutFactor", "MmapprParam", function(obj) obj@loessOptCutFactor)
 #' @rdname MmapprParam-functions
 #' @export
+# [CHANGE — GETTERS FOR NEW RECORDED SETTINGS]
+# The old implementation hard-coded these linkage/candidate/peak/RNG/expression choices and therefore had
+# no public accessors for them. The new implementation stores the settings in MmapprParam and exposes
+# ordinary S4 getters for the recorded values.
 setMethod("maxPileupDepth", "MmapprParam", function(obj) obj@maxPileupDepth)
 #' @rdname MmapprParam-functions
 #' @export
@@ -816,6 +885,10 @@ setMethod("expressionPseudocount", "MmapprParam", function(obj) obj@expressionPs
 # [FIX] All setters now validate the complete object after replacement. The old
 # setters could leave internally inconsistent state; most notably mutFiles<-
 # validated WT files, and refFasta<- did not update refGenome.
+# [CHANGE — SETTERS REVALIDATE OBJECT CONSISTENCY]
+# Most old scalar setters assigned slots directly, and resource setters performed little or no whole-object
+# validation. The new replacement methods share validation so inconsistent settings fail immediately and
+# refFasta/refGenome cannot silently drift apart.
 .validateAfterSet <- function(obj, deepBam = FALSE) {
     v <- .validMmapprParam(obj, deepBam = deepBam)
     if (isTRUE(v)) obj else stop(paste(v, collapse = "\n  "))
@@ -824,11 +897,19 @@ setMethod("expressionPseudocount", "MmapprParam", function(obj) obj@expressionPs
 # Resource-changing setters must preserve the same build/concordance invariant as
 # construction. Keep this out of scalar setters so changing a numerical tuning
 # parameter does not rescan BAM headers or annotations.
+# [CHANGE — RESOURCE SETTERS PRESERVE BUILD CONCORDANCE]
+# The old resource setters could replace BAMs, FASTA, or annotation independently without proving that
+# the resulting resources described the same reference build. The new resource setters rerun the shared
+# BAM/FASTA/annotation preflight; scalar-only setters deliberately avoid that expensive rescan.
 .preflightAfterResourceSet <- function(obj) {
     .preflightInputResourcesFrozen(obj@wtFiles, obj@mutFiles, obj@refGenome, obj@gtf)
     obj
 }
 
+# [CHANGE — BAM REPLACEMENT DEEP-VALIDATES/PREFLIGHTS]
+# The old wtFiles<- setter wrapped the replacement as a BamFileList and checked basic BAM validity only.
+# The new setter normalizes/indexes and deeply validates the WT BAM set, then proves build concordance
+# against the mutant BAMs, FASTA, and annotation before accepting it.
 setMethod("wtFiles<-", "MmapprParam", function(obj, value) {
     obj@wtFiles <- .indexBamFileList(normalizePath(.asBamPaths(value), mustWork = TRUE),
                                      outputFolder(obj))
@@ -836,14 +917,22 @@ setMethod("wtFiles<-", "MmapprParam", function(obj, value) {
     .preflightAfterResourceSet(obj)
 })
 
+# [CHANGE — MUTANT BAM SETTER BUG FIX + PREFLIGHT]
+# The old mutFiles<- method accidentally validated obj@wtFiles after assigning
+# mutant files. The new implementation validates the actual mutant replacement and then reruns full
+# cross-resource preflight before accepting it.
 setMethod("mutFiles<-", "MmapprParam", function(obj, value) {
     obj@mutFiles <- .indexBamFileList(normalizePath(.asBamPaths(value), mustWork = TRUE),
                                       outputFolder(obj))
-    # [FIX] Validate obj@mutFiles (the original code accidentally checked wtFiles).
+    # [FIX] Validate obj@mutFiles; the old setter accidentally checked wtFiles.
     obj <- .validateAfterSet(obj, deepBam = TRUE)
     .preflightAfterResourceSet(obj)
 })
 
+# [CHANGE — SYNCHRONIZED/PREFLIGHTED FASTA REPLACEMENT]
+# The old refFasta<- setter changed only the path, leaving the cached FaFile potentially stale. The new
+# setter updates both representations, rebuilds a missing/empty/stale .fai, and preflights the replacement
+# FASTA against both BAM pools and the annotation.
 setMethod("refFasta<-", "MmapprParam", function(obj, value) {
     if (length(value) != 1L || !file.exists(value)) stop("refFasta must exist")
     value <- normalizePath(value, mustWork = TRUE)
@@ -856,6 +945,10 @@ setMethod("refFasta<-", "MmapprParam", function(obj, value) {
     .preflightAfterResourceSet(obj)
 })
 
+# [CHANGE — ANNOTATION REPLACEMENT PREFLIGHT]
+# The old gtf<- setter assigned the path with no resource validation. The new setter validates the
+# annotation path and checks its sequence names and coordinate bounds against the current FASTA/BAM
+# reference contract before accepting it.
 setMethod("gtf<-", "MmapprParam", function(obj, value) {
     if (length(value) != 1L || !file.exists(value)) stop("gtf must exist")
     obj@gtf <- normalizePath(value, mustWork = TRUE)
@@ -872,6 +965,9 @@ setMethod("outputFolder<-", "MmapprParam", function(obj, value) {
 })
 
 # Scalar setters use the full object validator so all constraints stay in one place.
+# [CHANGE — ONE VALIDATION PATH FOR SCALAR SETTERS]
+# The old scalar setters assigned values directly without rechecking type/range or cross-parameter rules.
+# The new scalar setters use one helper that applies the same central validation after each replacement.
 .setScalarSlot <- function(obj, slotName, value) {
     slot(obj, slotName) <- value
     .validateAfterSet(obj)

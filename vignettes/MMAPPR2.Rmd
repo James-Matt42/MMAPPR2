@@ -45,7 +45,7 @@ param <- mmapprParam(
 )
 ```
 
-# Important defaults added or made explicit in this revision
+# Important defaults and explicit controls
 
 ```{r parameters, eval=FALSE}
 param <- mmapprParam(
@@ -61,11 +61,11 @@ param <- mmapprParam(
   candidateMinAltDepth = 2,
   candidateMinAltFreq = 0.80,
   # These WT-specific hard filters are optional by default. WT evidence is
-  # still reported for every candidate but does not change frozen default ranking.
+  # still reported for every candidate but does not change the default candidate ordering.
   candidateMaxWtAltFreq = 1.00,
   candidateMinDeltaAF = 0.00,
   peakCutoffSd = 3,
-  # Compatibility-safe default: preserve the supplied main-branch cutoff.
+  # Default: use the old cutoff calculation; "global_sd" selects the new alternative.
   peakCutoffMethod = "legacy_current",
   peakIntervalWidth = 0.80,
   # Conservative default: span all selected high-density modes.
@@ -80,14 +80,14 @@ param <- mmapprParam(
 
 The two peak-method parameters are intentionally explicit because changing them changes
 the statistical interpretation of a run. `peakCutoffMethod="legacy_current"` preserves
-the supplied GitHub-main cutoff calculation; `"global_sd"` instead uses the genome-wide
+the old cutoff calculation; `"global_sd"` instead uses the genome-wide
 median of fitted values plus `peakCutoffSd` times their ordinary standard deviation.
 Likewise, `peakIntervalMethod="hpd_span"` spans all KDE grid locations selected by the
 high-density mass rule, whereas `"shortest_contiguous"` chooses one shortest contiguous
 interval and can intentionally exclude a secondary mode.
 
 For paired-end RNA-seq, set `pairedEnd=TRUE` so the descriptive expression summary
-counts fragments appropriately. `ignoreStrand=FALSE` preserves the original strand-aware
+counts fragments appropriately. `ignoreStrand=FALSE` preserves the old strand-aware
 `summarizeOverlaps()` behavior. The expression output is a raw-count fold-change
 summary, **not** a formal DESeq2/edgeR differential-expression test.
 
@@ -114,19 +114,19 @@ outputMmapprData(md)
 The current lightweight candidate caller is still SNV-focused. For each candidate it
 records mutant depth/allele frequency and WT depth/allele frequency. A variant whose
 ALT allele is high-frequency in both pools is marked `sharedBackgroundLike` as reporting
-metadata. In the frozen branch this flag does **not** change the default candidate order.
+metadata. By default this flag does **not** change the candidate order.
 
 The archive writes:
 
 - `AllCandidateVariantsFor<seq>.tsv`: all retained SNV candidates, including noncoding
   candidates and WT-vs-mutant evidence;
-- `DetectedMutationsFor<seq>.tsv`: coding consequences from `predictCoding()` (original filename restored);
+- `DetectedMutationsFor<seq>.tsv`: coding consequences from `predictCoding()` (established filename preserved);
 - `DifferentiallyExpressedGenesFor<seq>.tsv`: the historical filename for the descriptive raw-count fold-change screen;
 - `genome_plots.pdf`, `peak_plots.pdf`, `mmappr2.log`, and `mmappr_data.RDS`.
 
 # Deliberate remaining methodological limits
 
-This maintenance revision does **not** pretend to solve changes that require a larger,
+The new implementation does **not** attempt to solve changes that require a larger,
 validated scientific redesign. In particular:
 
 - exact indel/haplotype-aware candidate calling is not implemented;
@@ -139,5 +139,5 @@ validated scientific redesign. In particular:
   but only coding SNV effects receive `predictCoding()` annotations;
 - the expression summary is descriptive rather than inferential.
 
-See `IMPLEMENTED_CHANGES.md` for a detailed maintenance/change log and the distinction
-between fixed bugs and larger methodological work.
+See `CHANGE_ANNOTATION_INDEX.md` for a detailed old-to-new change map and the distinction
+between implementation fixes and larger methodological work.

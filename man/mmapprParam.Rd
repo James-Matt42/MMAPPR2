@@ -53,19 +53,19 @@ mmapprParam(
 \item{loessOptResolution}{Target resolution of LOESS-span optimization. Default 0.001.}
 \item{loessOptCutFactor}{Coarse-to-fine LOESS optimization refinement factor. Default 0.1.}
 \item{maxPileupDepth}{Maximum reads considered per BAM at one linkage-stage pileup position. Default 1000; final candidate pileup retains the historical 250-read cap.}
-\item{candidateMinDepth}{Optional pooled mutant depth floor for a candidate SNV. Default 1 is effectively inert given the two-ALT-read rule and preserves the original MMAPPR2 candidate behavior.}
+\item{candidateMinDepth}{Optional pooled mutant depth floor for a candidate SNV. Default 1 is effectively inert given the two-ALT-read rule and preserves the old effective candidate behavior.}
 \item{candidateMinAltDepth}{Minimum pooled mutant reads supporting the alternative allele. Default 2.}
 \item{candidateMinAltFreq}{Minimum mutant alternative-allele frequency for a candidate. Default 0.80.}
 \item{candidateMaxWtAltFreq}{Optional maximum WT alternative-allele frequency. Default 1 disables this hard filter while WT evidence is still reported.}
 \item{candidateMinDeltaAF}{Optional minimum mutant-minus-WT alternative-allele-frequency difference. Default 0 disables this hard filter.}
 \item{peakCutoffSd}{Multiplier applied to the variability term used by the selected initial peak-cutoff method. Default 3.}
-\item{peakCutoffMethod}{\code{"legacy_current"} (default) preserves the supplied GitHub-main cutoff: mean of chromosome fitted-value means plus \code{peakCutoffSd} times the square root of the summed per-chromosome \code{var(fitted)/n}. \code{"global_sd"} uses the genome-wide fitted-value median plus \code{peakCutoffSd} times the ordinary fitted-value SD.}
+\item{peakCutoffMethod}{\code{"legacy_current"} (default) preserves the old cutoff calculation: mean of chromosome fitted-value means plus \code{peakCutoffSd} times the square root of the summed per-chromosome \code{var(fitted)/n}. \code{"global_sd"} uses the genome-wide fitted-value median plus \code{peakCutoffSd} times the ordinary fitted-value SD.}
 \item{peakIntervalMethod}{\code{"hpd_span"} (default) conservatively spans all KDE grid positions selected by the high-density mass rule, including separated modes. \code{"shortest_contiguous"} chooses the shortest single contiguous interval containing the requested mass.}
 \item{peakResampleIterations}{Number of half-marker LOESS resamples for peak refinement. Default 1000.}
 \item{randomSeed}{Base random seed used to make peak refinement reproducible. Default 1.}
 \item{pairedEnd}{Whether expression-summary counting should treat the RNA-seq data as paired-end fragments.}
-\item{ignoreStrand}{Whether strand is ignored in the descriptive expression summary. Default FALSE preserves the original strand-aware counting behavior.}
-\item{expressionPseudocount}{Optional pseudocount for descriptive log2 fold change. Default 0 preserves the original raw-count ratio; positive values opt into the 9007 behavior.}
+\item{ignoreStrand}{Whether strand is ignored in the descriptive expression summary. Default FALSE preserves the old strand-aware counting behavior.}
+\item{expressionPseudocount}{Optional pseudocount for descriptive log2 fold change. Default 0 preserves the old raw-count ratio; positive values explicitly add a pseudocount before the ratio.}
 \item{overwrite}{If TRUE, explicitly permit clearing an existing non-empty output directory. Protected directories are still refused. Default FALSE.}
 }
 \value{A validated \code{MmapprParam} object.}

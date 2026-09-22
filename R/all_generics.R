@@ -14,9 +14,11 @@ setGeneric("peakIntervalWidth", function(obj) standardGeneric("peakIntervalWidth
 setGeneric("loessOptResolution", function(obj) standardGeneric("loessOptResolution"))
 setGeneric("loessOptCutFactor", function(obj) standardGeneric("loessOptCutFactor"))
 
-# [IMPROVE] These parameters make previously hard-coded analysis choices explicit.
-# Keeping them in MmapprParam makes runs reproducible and records the exact filtering
-# and resampling behavior alongside the rest of the analysis configuration.
+# [CHANGE — PUBLIC ANALYSIS-PARAMETER API]
+# The new implementation adds getters for analysis choices that were hard-coded inside the old implementation:
+# linkage pileup depth; candidate depth/frequency and optional WT filters; peak
+# cutoff/interval/resampling controls; RNG seed; and expression counting controls.
+# Storing them in MmapprParam makes the exact run configuration serializable.
 setGeneric("maxPileupDepth", function(obj) standardGeneric("maxPileupDepth"))
 setGeneric("candidateMinDepth", function(obj) standardGeneric("candidateMinDepth"))
 setGeneric("candidateMinAltDepth", function(obj) standardGeneric("candidateMinAltDepth"))
@@ -47,6 +49,10 @@ setGeneric("distancePower<-", function(obj, value) standardGeneric("distancePowe
 setGeneric("peakIntervalWidth<-", function(obj, value) standardGeneric("peakIntervalWidth<-"))
 setGeneric("loessOptResolution<-", function(obj, value) standardGeneric("loessOptResolution<-"))
 setGeneric("loessOptCutFactor<-", function(obj, value) standardGeneric("loessOptCutFactor<-"))
+# [CHANGE — VALIDATED REPLACEMENT API]
+# The old API had no setters for the newly exposed analysis controls because those controls were
+# hard-coded. The new API adds matching replacement generics whose methods re-run parameter validation
+# instead of requiring direct slot mutation.
 setGeneric("maxPileupDepth<-", function(obj, value) standardGeneric("maxPileupDepth<-"))
 setGeneric("candidateMinDepth<-", function(obj, value) standardGeneric("candidateMinDepth<-"))
 setGeneric("candidateMinAltDepth<-", function(obj, value) standardGeneric("candidateMinAltDepth<-"))

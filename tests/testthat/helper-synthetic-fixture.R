@@ -27,7 +27,7 @@
     paste("r1", 0, "chr1", 10, 60, "10M100N10M", "*", 0, 0,
           seq20, qual20, sep = "\t"),
     # Duplicate-marked primary alignment (0x400): duplicate status is deliberately
-    # left unspecified, matching the original/9007 read-filter policy.
+    # left unspecified, matching the old implementation's read-filter policy.
     paste("rdup", 1024, "chr1", 50, 60, "20M", "*", 0, 0,
           seq20, qual20, sep = "\t"),
     # Secondary (0x100) and supplementary (0x800) alignments: these represent

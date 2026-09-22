@@ -53,12 +53,16 @@ mmappr <- function(mmapprParam) {
     message("-------- Welcome to MMAPPR2 --------")
     message("------------------------------------\n")
 
-    # [FIX] The current implementation uses Rsamtools for BAM pileup and no
-    # longer requires an external samtools executable at startup. The old check
-    # was stale and could reject an otherwise valid Bioconductor installation.
+    # [CHANGE — REMOVE STALE SAMTOOLS STARTUP REQUIREMENT]
+    # The old implementation aborted unless an external `samtools` executable was on PATH,
+    # even though the new pipeline performs BAM work through Rsamtools.
+    # The new implementation removes that unrelated startup failure.
     md <- mmapprData(mmapprParam)
     oF <- outputFolder(md@param)
     .messageAndLog(paste('Start time:', Sys.time()), oF)
+    # [CHANGE — LOG THE CANONICAL OUTPUT PATH]
+    # The old implementation prepended getwd() while logging the output folder, which could misreport an
+    # already-absolute path. The new implementation logs the normalized outputFolder path directly.
     .messageAndLog(paste('Output folder:', oF, '\n'), oF)
     .log('Parameters:', oF)
     .log(mmapprParam, oF)
@@ -95,6 +99,10 @@ mmappr <- function(mmapprParam) {
     endTime <- Sys.time()
     .messageAndLog(paste('\nEnd time:', endTime), oF)
     .messageAndLog(paste("MMAPPR2 runtime:", format(endTime - startTime)), oF)
+    # [CHANGE — DURABLE CHECKPOINT WRITES]
+    # The old implementation wrote mmappr_data.RDS directly with saveRDS(). The new implementation serializes
+    # to a same-directory temporary file and installs it through .atomicSaveRDS(),
+    # preserving the previous checkpoint if replacement fails mid-write.
     .atomicSaveRDS(md, file.path(md@param@outputFolder, "mmappr_data.RDS"))
     .log('\nsessionInfo()', oF)
     .log(sessionInfo(), oF)
@@ -119,6 +127,6 @@ mmappr <- function(mmapprParam) {
 }
 
 
-# [FIX] The former .checkDep('samtools') helper was removed. The revised current
-# implementation performs BAM pileups through Rsamtools and no longer shells out
-# to samtools, so requiring an unrelated executable was a stale startup failure.
+# [CHANGE — DEAD DEPENDENCY HELPER REMOVED]
+# The old implementation .checkDep() existed only for the external samtools startup test.
+# Because the new implementation no longer requires that executable, the helper itself is removed.

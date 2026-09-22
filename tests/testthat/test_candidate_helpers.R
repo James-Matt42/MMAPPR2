@@ -4,7 +4,7 @@ test_that("mutant candidate threshold preserves strict original >80 percent boun
     altDepth = c(16, 17, 16, 2, 1, 0),
     minDepth = 1, minAltDepth = 2, minAltFreq = .80
   )
-  # 2/2 is intentionally valid: the historical caller's meaningful depth rule
+  # 2/2 is intentionally valid: the old caller's effective depth rule
   # was two ALT-supporting reads, not the linkage-stage 20-read depth floor.
   expect_identical(keep, c(FALSE, TRUE, TRUE, TRUE, FALSE, FALSE))
 })

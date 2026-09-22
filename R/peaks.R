@@ -35,6 +35,10 @@
 NULL
 
 
+# [CHANGE — PARAMETERIZED, REPRODUCIBLE PEAK REFINEMENT]
+# The old implementation hard-coded the peak cutoff multiplier and 1,000 resamples, used one interval
+# rule, and depended on the ambient RNG state. The new implementation records those choices in
+# MmapprParam, supports an explicit interval method, and uses deterministic chromosome-specific seeds.
 peakRefinement <- function(mmapprData){
     mmapprData@peaks <- BiocParallel::bplapply(
         mmapprData@peaks,
@@ -45,6 +49,10 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — FLAT-APEX POSITION FIX]
+# When multiple markers share the maximum LOESS value, the old implementation effectively
+# selected the first/left-most maximum. The new implementation reports the median genomic position of
+# the plateau, removing that arbitrary positional bias.
 .peakApexPosition <- function(x, fitted) {
     valid <- is.finite(x) & is.finite(fitted)
     if (!any(valid)) return(NA_real_)
@@ -57,6 +65,10 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — RESAMPLE FAILURE TOLERANCE]
+# In the old implementation, an error in any half-marker LOESS resample could abort the
+# entire refinement. The new implementation converts a failed resample to NA, excludes it from
+# the density estimate, and records the resulting resample success rate.
 .getSubsampleLoessMax <- function(rawData, loessSpan) {
     n <- nrow(rawData)
     if (n < 5L) return(NA_real_)
@@ -79,6 +91,10 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — KDE INTEGRATED AS PROBABILITY MASS]
+# The old implementation's interval selection treated sampled KDE heights as if they were
+# directly comparable probability mass. The new implementation multiplies density by local grid-cell
+# widths before selecting the requested mass, which is correct on nonuniform grids.
 .densityPointMass <- function(x, y) {
     stopifnot(length(x) == length(y), length(x) >= 1L)
     if (length(x) == 1L) return(1)
@@ -94,6 +110,11 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — EXPLICIT REFINED-INTERVAL METHODS]
+# The old implementation had one density-threshold rule and returned the span from the leftmost
+# to rightmost selected position. The new implementation names that envelope-style choice `hpd_span`
+# (now using integrated KDE mass) and adds `shortest_contiguous` as an opt-in shortest single
+# interval; both target peakIntervalWidth probability mass.
 .getPeakFromTopP <- function(data, topP, method = c("hpd_span", "shortest_contiguous")) {
     stopifnot(ncol(data) == 2L, topP > 0, topP <= 1)
     method <- match.arg(method)
@@ -106,8 +127,8 @@ peakRefinement <- function(mmapprData){
     peakPos <- .peakApexPosition(data$x, data$y)
 
     if (method == "hpd_span") {
-        # [FIX/IMPROVE] Preserve the conservative intent of the supplied MMAPPR2
-        # implementation without constructing one row per genomic base. Rank the
+        # [FIX/IMPROVE] Preserve the old interval rule without constructing one row
+        # per genomic base. Rank the
         # compact KDE grid by density, accumulate probability mass, then span all
         # grid points at or above the resulting density threshold. If the density
         # is multimodal this intentionally keeps both plausible modes inside the
@@ -124,7 +145,7 @@ peakRefinement <- function(mmapprData){
 
     # Optional alternative: the shortest ONE-PIECE interval containing the
     # requested mass. This is narrower, but can discard a secondary plausible
-    # mode, so it is deliberately not the compatibility-safe default.
+    # mode, so it is deliberately not the default that preserves the old interval behavior.
     cs <- c(0, cumsum(mass))
     bestLeft <- 1L
     bestRight <- nrow(data)
@@ -146,6 +167,10 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — REPRODUCIBLE CHROMOSOME RNG]
+# The old implementation sampled from the ambient RNG stream, so results could depend on prior RNG use
+# and chromosome processing order. The new implementation derives a stable chromosome-specific seed
+# from the recorded base seed.
 .derivedSeed <- function(baseSeed, seqname) {
     # Deterministic per chromosome and stable across serial/parallel execution.
     chars <- utf8ToInt(as.character(seqname))
@@ -154,6 +179,12 @@ peakRefinement <- function(mmapprData){
 }
 
 
+# [CHANGE — PEAK-REFINEMENT HARDENING/METADATA]
+# The old implementation returned a minimal interval/density record, used the caller RNG stream, and
+# assumed resampling/density coordinates were directly usable. The new implementation normalizes LOESS
+# predictors, restores caller RNG state, tolerates failed resamples, clips density support to chromosome
+# bounds, returns valid integer coordinates, and records LOESS/density apices, success rate, seed, and
+# interval-construction metadata.
 .peakRefinementChr <- function(inputList, mmapprData) {
     stopifnot("seqname" %in% names(inputList))
     seqname <- inputList$seqname
@@ -237,7 +268,7 @@ peakRefinement <- function(mmapprData){
          start = lower,
          end = upper,
          densityFunction = densityFunction,
-         peakPosition = peak$peakPos,       # resampling-density apex (compatibility)
+         peakPosition = peak$peakPos,       # resampling-density apex; preserves the old field meaning
          densityPeakPosition = peak$peakPos,
          loessPeakPosition = loessPeak,
          densityData = densityData,
@@ -266,6 +297,10 @@ peakRefinement <- function(mmapprData){
 NULL
 
 
+# [CHANGE — EXPLICIT INITIAL-PEAK CUTOFF SEMANTICS]
+# The old implementation hard-coded a multiplier of 3 and used the mean of chromosome means plus
+# 3 * sqrt(sum(var/n)). The new implementation exposes the multiplier and method: `legacy_current`
+# applies that old formula to finite fitted values, while `global_sd` is an explicit alternative.
 .calculatePeakCutoff <- function(snpDistance, method = c("legacy_current", "global_sd"), k = 3) {
     method <- match.arg(method)
     valid <- lapply(snpDistance, function(chr) {
@@ -276,10 +311,10 @@ NULL
     if (length(valid) == 0L) stop("No finite LOESS values are available for peak thresholding")
 
     if (method == "legacy_current") {
-        # [NOTE] Compatibility mode reproduces the supplied GitHub-main idea:
-        # an unweighted mean of chromosome means plus k * sqrt(sum(var/n)).
-        # The latter is standard-error-like rather than a literal genome-wide SD,
-        # but changing it silently would change historical peak calls.
+        # [NOTE] This path uses the old cutoff formula: an unweighted mean of
+        # chromosome means plus k * sqrt(sum(var/n)). The spread term is
+        # standard-error-like rather than a literal genome-wide SD; keeping it
+        # here preserves the old threshold semantics when this method is selected.
         centers <- vapply(valid, mean, numeric(1))
         varianceTerms <- vapply(valid, function(x) if (length(x) > 1L) stats::var(x) / length(x) else 0, numeric(1))
         center <- mean(centers)
@@ -297,6 +332,10 @@ NULL
 }
 
 
+# [CHANGE — NA-SAFE PEAK DETECTION WITH PROVENANCE]
+# The old implementation tested `any(fitted > cutoff)` directly and stored only the sequence name for
+# chromosomes that passed. The new implementation ignores non-finite fitted values safely and stores
+# the cutoff center, spread, value, and method with each initial peak for downstream diagnostics.
 prePeak <- function(mmapprData) {
     mmapprData@peaks <- list()
     cutoffInfo <- .calculatePeakCutoff(

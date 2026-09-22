@@ -32,6 +32,11 @@
 NULL
 
 
+# [CHANGE — OUTPUT/RECOVERY CONTRACT FIXES]
+# The new implementation repairs the missing-output-directory recovery branch (the old implementation passed a
+# MmapprData object where a path was expected), closes only graphics devices opened
+# by this function, writes the richer candidate tables through safe serializers,
+# and returns the documented MmapprData object invisibly rather than integer 1.
 outputMmapprData <- function(mmapprData) {
   stopifnot(is(mmapprData, "MmapprData"))
   
@@ -65,6 +70,10 @@ outputMmapprData <- function(mmapprData) {
 }
 
 
+# [CHANGE — ATOMIC RDS CHECKPOINT HELPER]
+# The old checkpoint path wrote directly to the target RDS, so interruption could leave a partial file.
+# The new helper writes and verifies a same-directory temporary RDS before replacement; when direct
+# overwrite-by-rename is unavailable, it preserves the old target and restores it on failure.
 .atomicSaveRDS <- function(object, file, .renameFile = file.rename) {
   dir <- dirname(file)
   if (!dir.exists(dir)) stop("RDS destination directory does not exist: ", dir)
@@ -110,6 +119,10 @@ outputMmapprData <- function(mmapprData) {
 }
 
 
+# [CHANGE — COLLISION-RESISTANT OUTPUT NAMES]
+# The old implementation used a timestamp alone, so runs started in the same second could
+# collide. The new implementation uses tempfile-generated unique suffixes for default and temporary
+# output paths without consuming the analysis RNG stream.
 .defaultOutputFolder <- function() {
   stamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
   # [IMPROVE] tempfile() adds a collision-resistant suffix without consuming R's
@@ -145,6 +158,12 @@ tempOutputFolder <- function() {
 }
 
 
+# [CHANGE — NONINTERACTIVE, PROTECTED OVERWRITE]
+# The old implementation prompted interactively and could recursively clear an existing
+# directory after a single response. The new implementation requires explicit overwrite=TRUE, refuses
+# root/top-level/home/current/temp-session directories, verifies clearing succeeds,
+# creates paths recursively, normalizes the accepted path, and creates the log file
+# without interactive input.
 .prepareOutputFolder <- function(outputFolder, overwrite = FALSE) {
   if (!is.character(outputFolder) || length(outputFolder) != 1L || !nzchar(outputFolder))
     stop("outputFolder must be one non-empty path")
@@ -152,11 +171,9 @@ tempOutputFolder <- function() {
   if (dir.exists(outputFolder)) {
     existingPath <- normalizePath(outputFolder, mustWork = TRUE)
 
-    # [FIX] Evaluate overwrite safety BEFORE checking whether the directory is
-    # currently empty. The previous guard only ran inside `length(contents) > 0`,
-    # so `overwrite=TRUE` could accept R's session temp root (or another protected
-    # directory) whenever it happened to be empty. Safety must be a property of
-    # the target path itself, not of its current contents.
+    # [FIX] Evaluate overwrite safety before checking directory contents. The
+    # old implementation had no protected-path rule; the new rule applies even
+    # when the target is empty, because safety is a property of the path itself.
     if (isTRUE(overwrite)) {
       protected <- unique(normalizePath(c(path.expand("~"), getwd(), tempdir()),
                                         mustWork = TRUE))
@@ -192,6 +209,9 @@ tempOutputFolder <- function() {
 
 
 
+# [CHANGE — DEGENERATE PLOT LIMIT GUARDS]
+# The old plotting code constructed limits directly from min/max values, which can fail for constant,
+# empty, or non-finite data. The new helpers return finite non-zero-width limits for those edge cases.
 .safeYLim <- function(x, upperPad = 0.10) {
   # [FIX] Base plot() rejects zero-width or non-finite limits. Constant/degenerate
   # fits can occur on small datasets, so construct a finite visible range.
@@ -216,6 +236,10 @@ tempOutputFolder <- function() {
   c(lo, hi)
 }
 
+# [CHANGE — GENOME-PLOT HARDENING/METADATA]
+# The old genome plot used raw min/max limits and did not display peak-cutoff/refined-region metadata.
+# The new plot uses safe limits, normalized numeric LOESS coordinates, namespaced sequence ordering, and
+# explicit cutoff/region overlays; device handling also avoids closing unrelated user devices.
 .plotGenomeDistance <- function(mmapprData, savePdf = TRUE) {
   #generate one big dataframe for plots, along with break and label points
   tailPos <- 0
@@ -284,6 +308,11 @@ tempOutputFolder <- function() {
 }
 
 
+# [CHANGE — REFINED-PEAK DIAGNOSTICS]
+# The old peak plot shaded to a hard-coded -5 baseline, omitted the initial cutoff, and labeled the KDE
+# overlay as probability while relying on raw ranges. The new plot shades from the actual plotting
+# baseline, shows the stored cutoff, handles degenerate density support safely, and labels the overlay
+# as density.
 .plotPeaks <- function(mmapprData) {
   if (length(mmapprData@peaks) == 0L) return(invisible(NULL))
   pdf(file.path(mmapprData@param@outputFolder, "peak_plots.pdf"),
@@ -365,6 +394,11 @@ tempOutputFolder <- function() {
 # DNAStringSet, IRanges, or other vector-like columns; base write.table() errors on
 # genuine list columns ("unimplemented type 'list'"). Atomic columns are preserved
 # as-is so numeric depths/frequencies stay numeric in the TSV.
+# [CHANGE — ROBUST TSV SERIALIZATION]
+# Old write.table() calls can fail on VariantAnnotation/GenomicRanges list-like
+# metadata. The new implementation flattens only non-atomic cells deterministically, sanitizes embedded
+# tabs/newlines, preserves ordinary numeric columns, and handles zero-row list
+# columns so header-only result files still serialize correctly.
 .tsvSafeDataFrame <- function(x) {
   df <- as.data.frame(x)
   # Even a zero-row table can contain a list/List column whose class makes
@@ -417,6 +451,11 @@ tempOutputFolder <- function() {
 }
 
 
+# [CHANGE — PRESERVE OLD MUTATION TABLE WHILE ADDING METADATA]
+# The old implementation wrote a fixed DetectedMutationsFor*.tsv schema. The new implementation
+# reconstructs that same schema/column order from the richer coding-effect object, using explicit mutant
+# depth metadata when predictCoding() does not carry the standard depth columns. WT/delta-AF evidence
+# is written separately in AllCandidateVariantsFor*.tsv rather than changing the old table.
 .originalDetectedMutationTable <- function(x) {
   df <- as.data.frame(x, stringsAsFactors = FALSE)
   originalCols <- c("seqnames", "start", "end", "width", "strand",
@@ -425,14 +464,14 @@ tempOutputFolder <- function() {
                     "REFAA", "VARAA")
 
   # Current predictCoding versions do not consistently propagate the query's
-  # standard depth columns, but the frozen object carries equivalent mutant
-  # evidence explicitly. Use it only to reconstruct the historical table fields.
+  # standard depth columns, but the current object carries equivalent mutant
+  # evidence explicitly. Use it only to reconstruct the old table fields.
   if (!"refDepth" %in% names(df) && "mutRefDepth" %in% names(df))
     df$refDepth <- df$mutRefDepth
   if (!"altDepth" %in% names(df) && "mutAltDepth" %in% names(df))
     df$altDepth <- df$mutAltDepth
 
-  # Original MMAPPR2 emitted the first protein-location value for this legacy
+  # The old table emitted the first protein-location value for this
   # table. VariantAnnotation commonly stores PROTEINLOC as an IRanges/S4Vectors
   # List derivative rather than a base list, so handle both without flattening the
   # richer annotation retained in the in-memory object.
@@ -450,12 +489,17 @@ tempOutputFolder <- function() {
 
   # Assign a zero-length vector when x has zero rows. Assigning scalar NA to a
   # zero-row data.frame can otherwise create a replacement-length error instead
-  # of producing the desired header-only legacy table.
+  # of producing the desired header-only old-format table.
   for (nm in setdiff(originalCols, names(df))) df[[nm]] <- rep(NA, nrow(df))
   df[, originalCols, drop = FALSE]
 }
 
 
+# [CHANGE — FULL SNV OUTPUT IN ADDITION TO OLD FILES]
+# The old implementation wrote coding-effect rows and expression output only, so noncoding
+# candidate SNVs disappeared from tabular output. The new implementation adds AllCandidateVariantsFor*
+# with the complete SNV/WT evidence while retaining the old mutation and
+# expression filenames/schema through the safe TSV writer.
 .writeCandidateTables <- function(candList, outputFolder){
   seqnames <- unique(c(names(candList$snps), names(candList$effects), names(candList$diff)))
   for (seqname in seqnames) {
@@ -467,8 +511,8 @@ tempOutputFolder <- function() {
     }
 
     if (!is.null(candList$effects[[seqname]])) {
-      # Frozen compatibility surface: preserve the original DetectedMutations
-      # table schema and column order. The richer SNV/WT metadata stays available
+      # Preserve the old DetectedMutations table schema and column order.
+      # The richer SNV/WT metadata stays available
       # in AllCandidateVariantsFor*.tsv and in the returned MmapprData object.
       .writeTsv(.originalDetectedMutationTable(candList$effects[[seqname]]),
                 file.path(outputFolder, paste0("DetectedMutationsFor", seqname, ".tsv")))
