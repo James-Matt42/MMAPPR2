@@ -1,7 +1,7 @@
 #' @title MmapprData Class
 #' 
 #' @name MmapprData-Class
-#' 
+#' @description
 #' Stores data from each step of the MMAPPR2 pipeline.
 #'
 #' @slot param \code{\linkS4class{MmapprParam}} object storing parameters
@@ -38,7 +38,7 @@ setClass("MmapprData",
 #' @title MmapprData Constructor
 #' 
 #' @name mmapprData
-#'
+#' @description
 #' Creates a \code{MmapprData} class Object. This object stores data from each
 #' step of the MMAPPR2 pipeline.
 #'
@@ -68,7 +68,7 @@ mmapprData <- function(param) {
 
 
 #' @title MmapprData Getters and Setters
-#'
+#' @description
 #' Access slots of \code{\linkS4class{MmapprData}} object. The only slot with 
 #' a setter is "param," as the others must be generated using one of the 
 #' functions in the pipeline.
@@ -114,15 +114,10 @@ setMethod("peaks", "MmapprData", function(obj) obj@peaks)
 setMethod("candidates", "MmapprData", function(obj) obj@candidates)
 #' @rdname MmapprData-functions
 #' @export
-# [CHANGE — PARAMETER REPLACEMENT INVALIDATES DERIVED STATE]
-# In the old implementation, replacing MmapprData@param could leave distances, peaks, and
-# candidates computed under the old parameters attached to the object. The new implementation warns
-# and clears those dependent slots whenever a parameter replacement occurs after
-# derived results exist, preventing a mixed-state analysis object.
 setMethod("param<-", "MmapprData",
           function(obj, value) {
             if (!is(value, "MmapprParam")) stop("param must be a MmapprParam object")
-            # [FIX/IMPROVE] Every derived slot depends on the analysis parameters.
+            # Every derived slot depends on the analysis parameters.
             # Replacing param while retaining old distances/peaks/candidates creates
             # a silently inconsistent object, so invalidate downstream results.
             hadResults <- length(obj@snpDistance) > 0L || length(obj@peaks) > 0L ||
@@ -184,7 +179,3 @@ setMethod("show", "MmapprData", function(object) {
 })
 
 
-# [CHANGE — ONE AUTHORITATIVE PILEUP IMPLEMENTATION]
-# The old implementation duplicated .getPileup() in this file and distance.R. The new implementation removes
-# this copy so RNA-seq CIGAR handling, read filters, pileup limits, and base-column
-# fixes cannot diverge between two implementations.

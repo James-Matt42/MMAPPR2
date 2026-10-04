@@ -1,8 +1,7 @@
 # MMAPPR2
-[![Build Status](https://travis-ci.org/kjohnsen/MMAPPR2.svg?branch=master)](https://travis-ci.org/kjohnsen/MMAPPR2)
-
 ## Mutation Mapping Analysis Pipeline for Pooled RNA-Seq
-### Kyle Johnsen, Nathaniel Jenkins, Jonathon Hill
+### Authors
+Kyle Johnsen, Nathaniel Jenkins, and Jonathon Hill
 
 ### Introduction
 MMAPPR2 maps mutations resulting from pooled RNA-seq data from the F2
@@ -18,4 +17,19 @@ Publication for the [original MMAPPR](http://genome.cshlp.org/content/23/4/687.f
 
 ## Installation Notes
 MMAPPR2 performs BAM and FASTA operations through the Bioconductor package Rsamtools. An external Samtools executable is not required.
+
+## Candidate-pileup memory and diagnostics
+
+Candidate SNV calling uses an adaptive memory strategy by default. On machines with
+sufficient available RAM, ordinary refined intervals retain the fast one-shot pileup.
+Large intervals or constrained environments are processed in bounded genomic chunks;
+within those chunks BAMs are pooled incrementally so all per-BAM pileup tables do not
+need to coexist in memory. WT candidate support uses the same adaptive strategy. If a
+one-shot mutant pileup still encounters an allocation failure, MMAPPR2 retries with
+smaller chunks and temporary RDS staging under R's `tempdir()`; staged files are
+removed automatically. Set `candidatePoolMode` and `candidateChunkSize` in
+`mmapprParam()` only when explicit control is needed.
+
+Set `exportAiccPlots=TRUE` in `mmapprParam()` to have `outputMmapprData()` write
+`aicc_plots.pdf` using the span/AICc evaluations already retained by `loessFit()`.
 

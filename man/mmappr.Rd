@@ -1,4 +1,4 @@
-% Manually synchronized with R/main.R in the revised archive.
+% Manually synchronized with R/main.R.
 \name{mmappr}
 \alias{mmappr}
 \title{Mutation Mapping Analysis Pipeline for Pooled RNA-Seq}

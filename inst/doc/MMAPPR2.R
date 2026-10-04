@@ -1,4 +1,3 @@
-## ----setup, eval=FALSE--------------------------------------------------------
 # param <- mmapprParam(
 #   wtFiles = c("wt_pool.bam"),
 #   mutFiles = c("mutant_pool.bam"),
@@ -7,7 +6,6 @@
 #   outputFolder = "mmappr2_results"
 # )
 
-## ----parameters, eval=FALSE---------------------------------------------------
 # param <- mmapprParam(
 #   wtFiles = "wt_pool.bam",
 #   mutFiles = "mutant_pool.bam",
@@ -24,8 +22,11 @@
 #   # still reported for every candidate but does not change the default candidate ordering.
 #   candidateMaxWtAltFreq = 1.00,
 #   candidateMinDeltaAF = 0.00,
+#   # Keep the fast one-shot pileup when it fits; otherwise chunk adaptively.
+#   candidatePoolMode = "auto",
+#   candidateChunkSize = 0,
 #   peakCutoffSd = 3,
-#   # Default: use the old cutoff calculation; "global_sd" selects the new alternative.
+#   # Default: use the compatibility cutoff; "global_sd" selects the genome-wide-SD alternative.
 #   peakCutoffMethod = "legacy_current",
 #   peakIntervalWidth = 0.80,
 #   # Conservative default: span all selected high-density modes.
@@ -33,13 +34,14 @@
 #   peakResampleIterations = 1000,
 #   randomSeed = 1,
 #   pairedEnd = FALSE,
-#   ignoreStrand = FALSE
+#   ignoreStrand = FALSE,
+#   expressionPseudocount = 0.01,
+#   # Export the evaluated AICc span curve for each fitted chromosome.
+#   exportAiccPlots = FALSE
 # )
 
-## ----run, eval=FALSE----------------------------------------------------------
 # md <- mmappr(param)
 
-## ----stages, eval=FALSE-------------------------------------------------------
 # md <- mmapprData(param)
 # md <- calculateDistance(md)  # pooled A/C/G/T frequencies and ED^p
 # md <- loessFit(md)           # chromosome-wise robust LOESS
@@ -47,4 +49,3 @@
 # md <- peakRefinement(md)     # reproducible half-marker resampling
 # md <- generateCandidates(md) # mutant SNVs + WT evidence + coding effects
 # outputMmapprData(md)
-

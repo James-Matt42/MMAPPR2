@@ -1,7 +1,7 @@
 #' @title Read BAM files and generate Euclidean distance data
 #'
 #' @name calculateDistance
-#'
+#' @description
 #' First step in the MMAPPR2 pipeline. Precedes the \code{\link{loessFit}}
 #' step.
 #'
@@ -25,10 +25,6 @@
 #' 
 NULL
 
-# [CHANGE — DISTANCE ENTRY-POINT HARDENING]
-# The new implementation fails explicitly when annotation processing yields no pileup ranges and
-# qualifies BiocParallel::bplapply rather than depending on an attached symbol.
-# The old implementation proceeded directly to bplapply with no empty-range diagnostic.
 calculateDistance <- function(mmapprData) {
   chrList <- suppressWarnings(.getFileReadChrList(param(mmapprData)))
 
@@ -41,16 +37,7 @@ calculateDistance <- function(mmapprData) {
 }
 
 
-# [CHANGE — ANNOTATION QUERY-RANGE REWRITE]
-# The old implementation shell-decompressed the GTF and parsed `gene` rows with fread.
-# The new implementation keeps the same preference for explicit annotation gene spans, but obtains
-# them through .annotationGeneRanges(), adds GFF/rtracklayer/TxDb fallbacks, aligns
-# annotation naming with the FASTA, checks shared sequence names, handles custom
-# assemblies more defensively, and recognizes additional mitochondrial aliases.
 .getFileReadChrList <- function(param) {
-  # Preserve the old implementation's choice of explicit annotation `gene` spans.
-  # Standard GTFs stay on the lightweight parser; .annotationGeneRanges() builds
-  # and closes a TxDb only as a fallback when explicit gene rows are unavailable.
   genes <- .annotationGeneRanges(param)
 
   if (length(genes) == 0L) stop("No gene ranges could be derived from the annotation")
@@ -59,10 +46,6 @@ calculateDistance <- function(mmapprData) {
   fa_si <- .faSeqinfo(param@refGenome)
   targetStyle <- .choose_target_style(fa_si)
   if (!is.na(targetStyle)) {
-    # [CHANGE — CENTRALIZED SAFE STYLE TRANSLATION]
-    # The old linkage-range code assumed annotation sequence names were already usable as BAM/FASTA
-    # query names. The new implementation uses one guarded style-conversion helper and falls back to
-    # the annotation's exact names when a safe conversion cannot be established.
     genes <- tryCatch(.setSeqlevelsStyleFrozen(genes, targetStyle),
                       error = function(e) genes)
   }
@@ -73,7 +56,7 @@ calculateDistance <- function(mmapprData) {
   genes <- GenomeInfoDb::keepSeqlevels(genes, common, pruning.mode = "coarse")
 
   if (!isTRUE(param@includeScaffolds)) {
-    # [NOTE] Standard-chromosome heuristics are useful for common model organisms
+    # Standard-chromosome heuristics are useful for common model organisms
     # but can remove valid contigs from custom assemblies. Users of such assemblies
     # should set includeScaffolds=TRUE.
     genes <- GenomeInfoDb::keepStandardChromosomes(genes, pruning.mode = "coarse")
@@ -81,8 +64,6 @@ calculateDistance <- function(mmapprData) {
       stop("No standard chromosomes remained after filtering. For a custom/non-model assembly, try includeScaffolds=TRUE.")
   }
 
-  # Preserve the old chrM/MT exclusions and recognize a few equivalent
-  # mitochondrial labels without changing autosomal/nuclear behavior.
   mitoNames <- intersect(GenomeInfoDb::seqlevels(genes),
                          c("chrM", "MT", "M", "MtDNA", "mitochondrion_genome"))
   if (length(mitoNames) > 0L)
@@ -90,24 +71,11 @@ calculateDistance <- function(mmapprData) {
   if (length(genes) == 0L)
     stop("No non-mitochondrial annotated gene ranges remain for mapping")
 
-  # [CHANGE — OVERLAPPING-GENE DOUBLE-COUNT FIX]
-  # The old implementation passed overlapping gene ranges directly to Rsamtools; overlapping
-  # `which` ranges can return the same alignment more than once. The new implementation reduces the
-  # ranges first so overlapping annotations cannot inflate depth or allele counts.
-  # [FIX] Query intervals must be disjoint. Rsamtools treats overlapping `which`
-  # ranges independently; without reduce(), the same read can be returned twice
-  # and its depth can be double-counted in overlapping genes.
   genes <- GenomicRanges::reduce(genes, ignore.strand = TRUE)
   split(genes, as.character(GenomicRanges::seqnames(genes)))
 }
 
 
-# [CHANGE — DISTANCE FILTER/AGGREGATION CORRECTIONS]
-# The new implementation retains per-file identity while aggregating replicates, averages coverage
-# across all supplied files, changes the minimum-depth boundary from old `>`
-# to inclusive `>=`, checks emptiness with nrow(), joins WT/mutant tables explicitly
-# on CHROM+POS, fixes the WT-homozygosity column selection, and removes non-finite
-# distance rows. The Euclidean-distance formula itself is unchanged.
 .calcDistForChr <- function(chrRange, param){
   tryCatch({
     stopifnot(length(unique(GenomicRanges::seqnames(chrRange))) == 1L)
@@ -127,7 +95,7 @@ calculateDistance <- function(mmapprData) {
     pileupWT <- .avgFiles(pileupWT,
                           fileAggregation = fileAggregation(param),
                           nFiles = length(wtFiles(param)))
-    # [FIX] "minimum depth" now means >= threshold rather than strictly >.
+    # "minimum depth" now means >= threshold rather than strictly >.
     pileupWT <- pileupWT[AVE.CVG >= minDepth(param)]
     if (nrow(pileupWT) == 0L) stop("Insufficient wild-type depth after filtering")
 
@@ -146,18 +114,10 @@ calculateDistance <- function(mmapprData) {
 
     data.table::setkey(pileupWT, CHROM, POS)
     data.table::setkey(pileupMut, CHROM, POS)
-    # [IMPROVE/R-VALIDATED] Make the scientific join key explicit. data.table's
-    # current merge() defaults would infer the shared keyed columns, but naming
-    # CHROM/POS here prevents a future extra shared column from silently changing
-    # which WT and mutant observations are paired.
-    # [CHANGE — EXPLICIT WT/MUTANT GENOMIC JOIN KEY]
-    # The old implementation relied on merge() inferring all shared columns. The new implementation declares
-    # CHROM/POS so future shared metadata cannot silently alter which observations
-    # are paired.
     distanceDf <- merge(pileupWT, pileupMut, by = c("CHROM", "POS"),
                         suffixes = c(".WT", ".MT"))
 
-    # [FIX] length(data.frame) counts columns, not rows.
+    # length(data.frame) counts columns, not rows.
     if (nrow(distanceDf) == 0L)
       stop("Empty dataframe after joining WT and mutant count tables")
 
@@ -168,7 +128,7 @@ calculateDistance <- function(mmapprData) {
                                   distancePower(param)]
 
     # Retain markers that are polymorphic in the phenotypically WT F2 pool.
-    # [FIX] Select the four WT frequency columns explicitly. In data.table,
+    # Select the four WT frequency columns explicitly. In data.table,
     # `AVE.A.FREQ.WT:AVE.T.FREQ.WT` evaluates `:` on the column vectors; it is
     # not a safe column-range selector and can produce nonsensical input to apply().
     wtFreqCols <- c("AVE.A.FREQ.WT", "AVE.C.FREQ.WT",
@@ -191,12 +151,6 @@ calculateDistance <- function(mmapprData) {
 }
 
 
-# Keep the WT-homozygosity rule in a pure helper so the old column-selection bug
-# can be regression-tested without constructing BAM files.
-# [CHANGE — WT HOMOZYGOSITY FILTER BUG FIX]
-# The old expression `AVE.A.FREQ.WT:AVE.T.FREQ.WT` applied `:` to vectors
-# rather than selecting four columns. The new implementation passes the WT A/C/G/T columns explicitly,
-# uses only finite evidence, and keeps the homozygosity rule independently testable.
 .wtHomozygousRows <- function(distanceDf, wtFreqCols, cutoff) {
   stopifnot(length(wtFreqCols) == 4L, all(wtFreqCols %in% names(distanceDf)))
   mat <- as.matrix(distanceDf[, ..wtFreqCols])
@@ -210,16 +164,6 @@ calculateDistance <- function(mmapprData) {
 }
 
 
-# [FIX] Use one explicit alignment-filter policy anywhere reads contribute to
-# allele counts or expression summaries. The old code did not explicitly reject
-# secondary, supplementary, failed-QC, or unmapped records. The new filter rejects
-# those records while leaving duplicate status unspecified, so duplicate-marked
-# primary reads remain eligible just as they were before.
-# [CHANGE — EXPLICIT PRIMARY-READ FILTER POLICY]
-# The old pileup did not explicitly exclude secondary, supplementary,
-# failed-QC, or unmapped records. The new implementation excludes those records anywhere reads
-# contribute to linkage/candidate/expression evidence. Duplicate-marked primary
-# reads remain eligible, preserving the old duplicate-read behavior.
 .primaryMappedScanFlag <- function() {
   Rsamtools::scanBamFlag(
     isUnmappedQuery = FALSE,
@@ -230,17 +174,10 @@ calculateDistance <- function(mmapprData) {
 }
 
 
-# Imports per-position A/C/G/T data from one BAM file.
-# [CHANGE — RNA-SEQ PILEUP AND BASE-TABLE HARDENING]
-# The old implementation used simpleCigar=TRUE, which discards ordinary spliced reads with
-# CIGAR `N`, fixed max_depth at 1000, and assumed every pileup had A/C/G/T columns.
-# The new implementation accepts complex RNA-seq CIGARs, applies the shared primary-read filter,
-# exposes linkage maxPileupDepth, ignores query Ns, handles empty pileups, and fills
-# absent nucleotide categories explicitly before calculating frequencies.
 .getPileup <- function(file, param, chrRange) {
   stopifnot(length(file) == 1L)
 
-  # [FIX] simpleCigar=TRUE discarded ordinary spliced RNA-seq reads containing
+  # simpleCigar=TRUE discarded ordinary spliced RNA-seq reads containing
   # CIGAR N operations, as well as clipped/indel-containing reads. pileup itself
   # understands reference skips, so do not throw away those reads wholesale.
   scanParam <- Rsamtools::ScanBamParam(
@@ -257,7 +194,7 @@ calculateDistance <- function(mmapprData) {
     distinguish_strands = FALSE,
     distinguish_nucleotides = TRUE,
     ignore_query_Ns = TRUE,
-    # [NOTE] The linkage statistic is intentionally A/C/G/T based. Indel support
+    # The linkage statistic is intentionally A/C/G/T based. Indel support
     # belongs in candidate calling and requires exact allele reconstruction; merely
     # counting '+'/'-' pileup symbols would not provide a valid normalized indel.
     include_deletions = FALSE,
@@ -275,7 +212,7 @@ calculateDistance <- function(mmapprData) {
                              value.var = "count", fun.aggregate = sum, fill = 0)
 
   data.table::setnames(pData, c("seqnames", "pos"), c("CHROM", "POS"))
-  # [FIX] Small regions do not necessarily contain all four nucleotide categories.
+  # Small regions do not necessarily contain all four nucleotide categories.
   # Create absent columns explicitly rather than renaming by column position.
   for (base in c("A", "C", "G", "T")) {
     if (!base %in% names(pData)) pData[, (base) := 0]
@@ -299,13 +236,6 @@ calculateDistance <- function(mmapprData) {
 }
 
 
-# Aggregate replicate pileups.
-# [CHANGE — DEFINED REPLICATE AGGREGATION SEMANTICS]
-# The old implementation lost sample identity before averaging, so zero-coverage replicates
-# disappeared from the coverage denominator. The new implementation defines `simple` as equal
-# frequency weighting among replicates with evidence and `weighted` as pooled-read
-# frequency weighting, while AVE.CVG always divides by the total number of supplied
-# files so missing coverage contributes zero rather than vanishing.
 .avgFiles <- function(chrDf, fileAggregation, nFiles) {
   stopifnot(fileAggregation %in% c("simple", "weighted"))
   stopifnot(nFiles >= 1L)

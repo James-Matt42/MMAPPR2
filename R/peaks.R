@@ -2,7 +2,7 @@
 #' @title Characterize Euclidean distance peaks using resampling simulation
 #'
 #' @name peakRefinement
-#'
+#' @description
 #' Follows the \code{\link{prePeak}} step and precedes
 #' \code{\link{generateCandidates}}.
 #'
@@ -35,10 +35,6 @@
 NULL
 
 
-# [CHANGE — PARAMETERIZED, REPRODUCIBLE PEAK REFINEMENT]
-# The old implementation hard-coded the peak cutoff multiplier and 1,000 resamples, used one interval
-# rule, and depended on the ambient RNG state. The new implementation records those choices in
-# MmapprParam, supports an explicit interval method, and uses deterministic chromosome-specific seeds.
 peakRefinement <- function(mmapprData){
     mmapprData@peaks <- BiocParallel::bplapply(
         mmapprData@peaks,
@@ -49,26 +45,18 @@ peakRefinement <- function(mmapprData){
 }
 
 
-# [CHANGE — FLAT-APEX POSITION FIX]
-# When multiple markers share the maximum LOESS value, the old implementation effectively
-# selected the first/left-most maximum. The new implementation reports the median genomic position of
-# the plateau, removing that arbitrary positional bias.
 .peakApexPosition <- function(x, fitted) {
     valid <- is.finite(x) & is.finite(fitted)
     if (!any(valid)) return(NA_real_)
     x <- as.numeric(x[valid])
     fitted <- as.numeric(fitted[valid])
     maxFit <- max(fitted)
-    # [FIX] Flat-topped fits should not be biased toward the first/left-most point.
+    # Flat-topped fits should not be biased toward the first/left-most point.
     # The median coordinate is stable and symmetric across a plateau.
     stats::median(x[fitted == maxFit])
 }
 
 
-# [CHANGE — RESAMPLE FAILURE TOLERANCE]
-# In the old implementation, an error in any half-marker LOESS resample could abort the
-# entire refinement. The new implementation converts a failed resample to NA, excludes it from
-# the density estimate, and records the resulting resample success rate.
 .getSubsampleLoessMax <- function(rawData, loessSpan) {
     n <- nrow(rawData)
     if (n < 5L) return(NA_real_)
@@ -85,16 +73,12 @@ peakRefinement <- function(mmapprData){
                      family = "symmetric"),
         silent = TRUE
     ))
-    # [FIX] One bad half-sample should not abort all 1,000 resamples.
+    # One bad half-sample should not abort all 1,000 resamples.
     if (inherits(fit, "try-error") || !inherits(fit, "loess")) return(NA_real_)
     .peakApexPosition(as.numeric(fit$x), fit$fitted)
 }
 
 
-# [CHANGE — KDE INTEGRATED AS PROBABILITY MASS]
-# The old implementation's interval selection treated sampled KDE heights as if they were
-# directly comparable probability mass. The new implementation multiplies density by local grid-cell
-# widths before selecting the requested mass, which is correct on nonuniform grids.
 .densityPointMass <- function(x, y) {
     stopifnot(length(x) == length(y), length(x) >= 1L)
     if (length(x) == 1L) return(1)
@@ -110,11 +94,6 @@ peakRefinement <- function(mmapprData){
 }
 
 
-# [CHANGE — EXPLICIT REFINED-INTERVAL METHODS]
-# The old implementation had one density-threshold rule and returned the span from the leftmost
-# to rightmost selected position. The new implementation names that envelope-style choice `hpd_span`
-# (now using integrated KDE mass) and adds `shortest_contiguous` as an opt-in shortest single
-# interval; both target peakIntervalWidth probability mass.
 .getPeakFromTopP <- function(data, topP, method = c("hpd_span", "shortest_contiguous")) {
     stopifnot(ncol(data) == 2L, topP > 0, topP <= 1)
     method <- match.arg(method)
@@ -127,12 +106,6 @@ peakRefinement <- function(mmapprData){
     peakPos <- .peakApexPosition(data$x, data$y)
 
     if (method == "hpd_span") {
-        # [FIX/IMPROVE] Preserve the old interval rule without constructing one row
-        # per genomic base. Rank the
-        # compact KDE grid by density, accumulate probability mass, then span all
-        # grid points at or above the resulting density threshold. If the density
-        # is multimodal this intentionally keeps both plausible modes inside the
-        # single interval supported by the current data model.
         ranked <- order(data$y, decreasing = TRUE)
         cumulative <- cumsum(mass[ranked])
         firstEnough <- which(cumulative >= topP)[1]
@@ -143,9 +116,6 @@ peakRefinement <- function(mmapprData){
                     peakPos = peakPos))
     }
 
-    # Optional alternative: the shortest ONE-PIECE interval containing the
-    # requested mass. This is narrower, but can discard a secondary plausible
-    # mode, so it is deliberately not the default that preserves the old interval behavior.
     cs <- c(0, cumsum(mass))
     bestLeft <- 1L
     bestRight <- nrow(data)
@@ -167,10 +137,6 @@ peakRefinement <- function(mmapprData){
 }
 
 
-# [CHANGE — REPRODUCIBLE CHROMOSOME RNG]
-# The old implementation sampled from the ambient RNG stream, so results could depend on prior RNG use
-# and chromosome processing order. The new implementation derives a stable chromosome-specific seed
-# from the recorded base seed.
 .derivedSeed <- function(baseSeed, seqname) {
     # Deterministic per chromosome and stable across serial/parallel execution.
     chars <- utf8ToInt(as.character(seqname))
@@ -179,19 +145,13 @@ peakRefinement <- function(mmapprData){
 }
 
 
-# [CHANGE — PEAK-REFINEMENT HARDENING/METADATA]
-# The old implementation returned a minimal interval/density record, used the caller RNG stream, and
-# assumed resampling/density coordinates were directly usable. The new implementation normalizes LOESS
-# predictors, restores caller RNG state, tolerates failed resamples, clips density support to chromosome
-# bounds, returns valid integer coordinates, and records LOESS/density apices, success rate, seed, and
-# interval-construction metadata.
 .peakRefinementChr <- function(inputList, mmapprData) {
     stopifnot("seqname" %in% names(inputList))
     seqname <- inputList$seqname
 
     loessObj <- mmapprData@snpDistance[[seqname]]$loess
     loessSpan <- loessObj$pars$span
-    # [IMPROVE] loess stores predictors in a matrix-like `x` component on some R
+    # loess stores predictors in a matrix-like `x` component on some R
     # versions. Normalize the single genomic predictor to a plain numeric vector so
     # downstream data.frame/subsetting behavior is unambiguous.
     rawData <- data.frame(pos = as.numeric(loessObj$x),
@@ -199,7 +159,7 @@ peakRefinement <- function(mmapprData){
     rawData <- rawData[is.finite(rawData$pos) & is.finite(rawData$euclideanDistance), , drop = FALSE]
     if (nrow(rawData) < 10L) stop("Too few finite markers to refine peak on ", seqname)
 
-    # [FIX] Peak refinement used to depend on the ambient RNG state, so identical
+    # Peak refinement used to depend on the ambient RNG state, so identical
     # inputs could yield slightly different intervals. Use a deterministic seed
     # derived from the user-recorded base seed and chromosome name.
     seed <- .derivedSeed(randomSeed(mmapprData@param), seqname)
@@ -234,7 +194,7 @@ peakRefinement <- function(mmapprData){
         densityData <- stats::density(maxValues)
         densityDf <- data.frame(x = densityData$x, y = densityData$y)
 
-        # [FIX] KDE support can extend beyond the chromosome. Clip it before using
+        # KDE support can extend beyond the chromosome. Clip it before using
         # the density to define a physical genomic interval.
         fa_si <- .faSeqinfo(mmapprData@param@refGenome)
         chrLen <- GenomeInfoDb::seqlengths(fa_si)[seqname]
@@ -261,7 +221,7 @@ peakRefinement <- function(mmapprData){
     loessX <- as.numeric(loessObj$x)
     loessPeak <- .peakApexPosition(loessX, loessObj$fitted)
 
-    # [LIMIT] This data model still represents one refined locus per chromosome.
+    # This data model still represents one refined locus per chromosome.
     # Proper polygenic / multiple-same-chromosome support requires changing the
     # peaks structure and downstream output, not simply choosing a second maximum.
     list(seqname = seqname,
@@ -285,7 +245,7 @@ peakRefinement <- function(mmapprData){
 #' @title Identify chromosomes containing peaks
 #'
 #' @name prePeak
-#'
+#' @description
 #' Follows the \code{\link{loessFit}} step and precedes
 #' \code{\link{peakRefinement}}.
 #'
@@ -297,10 +257,6 @@ peakRefinement <- function(mmapprData){
 NULL
 
 
-# [CHANGE — EXPLICIT INITIAL-PEAK CUTOFF SEMANTICS]
-# The old implementation hard-coded a multiplier of 3 and used the mean of chromosome means plus
-# 3 * sqrt(sum(var/n)). The new implementation exposes the multiplier and method: `legacy_current`
-# applies that old formula to finite fitted values, while `global_sd` is an explicit alternative.
 .calculatePeakCutoff <- function(snpDistance, method = c("legacy_current", "global_sd"), k = 3) {
     method <- match.arg(method)
     valid <- lapply(snpDistance, function(chr) {
@@ -311,16 +267,12 @@ NULL
     if (length(valid) == 0L) stop("No finite LOESS values are available for peak thresholding")
 
     if (method == "legacy_current") {
-        # [NOTE] This path uses the old cutoff formula: an unweighted mean of
-        # chromosome means plus k * sqrt(sum(var/n)). The spread term is
-        # standard-error-like rather than a literal genome-wide SD; keeping it
-        # here preserves the old threshold semantics when this method is selected.
         centers <- vapply(valid, mean, numeric(1))
         varianceTerms <- vapply(valid, function(x) if (length(x) > 1L) stats::var(x) / length(x) else 0, numeric(1))
         center <- mean(centers)
         spread <- sqrt(sum(varianceTerms))
     } else {
-        # [IMPROVE] Optional statistically clearer alternative: a robust global
+        # Optional statistically clearer alternative: a robust global
         # center with the ordinary SD of all fitted marker values. This is still
         # a heuristic threshold, not a calibrated false-positive probability.
         allFitted <- unlist(valid, use.names = FALSE)
@@ -332,10 +284,6 @@ NULL
 }
 
 
-# [CHANGE — NA-SAFE PEAK DETECTION WITH PROVENANCE]
-# The old implementation tested `any(fitted > cutoff)` directly and stored only the sequence name for
-# chromosomes that passed. The new implementation ignores non-finite fitted values safely and stores
-# the cutoff center, spread, value, and method with each initial peak for downstream diagnostics.
 prePeak <- function(mmapprData) {
     mmapprData@peaks <- list()
     cutoffInfo <- .calculatePeakCutoff(
@@ -349,7 +297,7 @@ prePeak <- function(mmapprData) {
         if (!is.list(chr) || !inherits(chr$loess, "loess")) next
         loessForChr <- chr$loess
         if (length(loessForChr$x) < 50L) next
-        # [FIX] NA fitted values no longer make any() return NA and break if().
+        # NA fitted values no longer make any() return NA and break if().
         containsPeak <- any(loessForChr$fitted > cutoffInfo$cutoff, na.rm = TRUE)
         chrName <- names(mmapprData@snpDistance)[[i]]
         if (containsPeak) {

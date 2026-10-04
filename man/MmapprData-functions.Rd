@@ -1,4 +1,4 @@
-% Manually synchronized with R/mmapprData.R in the revised archive.
+% Manually synchronized with R/mmapprData.R.
 \name{MmapprData-functions}
 \alias{MmapprData-functions}
 \alias{param}

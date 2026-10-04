@@ -12,7 +12,7 @@ test_that("spliced RNA-seq reads survive mapping pileup", {
   expect_true(any(x$POS == 10L))
   expect_true(any(x$POS == 120L))
   expect_true(any(x$POS == 50L)) # duplicate status remains unspecified
-  # [REGRESSION] Alternative alignments must not be counted in addition to the
+  # Alternative alignments must not be counted in addition to the
   # primary alignment. These positions exist only in the synthetic secondary/
   # supplementary records above.
   expect_false(any(x$POS == 160L))

@@ -9,10 +9,10 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Annotated maintenance revision" />
+<meta name="author" content="Kyle Johnsen, Nathaniel Jenkins, and Jonathon Hill" />
 
 
-<title>MMAPPR2 revised-current workflow</title>
+<title>MMAPPR2 workflow</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -349,20 +349,19 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">MMAPPR2 revised-current workflow</h1>
-<h4 class="author">Annotated maintenance revision</h4>
+<h1 class="title toc-ignore">MMAPPR2 workflow</h1>
+<h4 class="author">Kyle Johnsen, Nathaniel Jenkins, and Jonathon Hill</h4>
 
 </div>
 
 
 <div id="scope" class="section level1">
 <h1>Scope</h1>
-<p>This vignette describes the <strong>current R implementation in this
-revised archive</strong>. The vignette that accompanied the uploaded
-source still described an older MMAPPR2 design based on GMAP, external
+<p>This vignette describes the current MMAPPR2 workflow and its public
+analysis controls. MMAPPR2 uses Bioconductor APIs for BAM/FASTA access
+and local coding-effect annotation; external GMAP, command-line
 <code>samtools mpileup</code>, Ensembl VEP, <code>species</code>, and
-<code>VEPFlags</code>. Those interfaces are not part of the current code
-and have therefore been removed from this vignette.</p>
+<code>VEPFlags</code> are not required by the current workflow.</p>
 <p>MMAPPR2 maps a phenotype from pooled F2 RNA-seq in two conceptual
 phases:</p>
 <ol style="list-style-type: decimal">
@@ -374,7 +373,7 @@ WT-pool evidence, and annotate coding consequences.</li>
 </div>
 <div id="inputs" class="section level1">
 <h1>Inputs</h1>
-<p>The revised constructor expects:</p>
+<p>The constructor expects:</p>
 <ul>
 <li>one or more WT-pool BAM files;</li>
 <li>one or more mutant-pool BAM files;</li>
@@ -392,7 +391,7 @@ uncompressed or shell-processed.</p>
   outputFolder = &quot;mmappr2_results&quot;
 )</code></pre>
 </div>
-<div id="important-defaults-added-or-made-explicit-in-this-revision" class="section level1">
+<div id="important-defaults-and-explicit-controls" class="section level1">
 <h1>Important defaults and explicit controls</h1>
 <pre class="r"><code>param &lt;- mmapprParam(
   wtFiles = &quot;wt_pool.bam&quot;,
@@ -410,8 +409,11 @@ uncompressed or shell-processed.</p>
   # still reported for every candidate but does not change the default candidate ordering.
   candidateMaxWtAltFreq = 1.00,
   candidateMinDeltaAF = 0.00,
+  # Keep the fast one-shot pileup when it fits; otherwise chunk adaptively.
+  candidatePoolMode = &quot;auto&quot;,
+  candidateChunkSize = 0,
   peakCutoffSd = 3,
-  # Default: use the old cutoff calculation; &quot;global_sd&quot; selects the new alternative.
+  # Default: use the compatibility cutoff; &quot;global_sd&quot; selects the genome-wide-SD alternative.
   peakCutoffMethod = &quot;legacy_current&quot;,
   peakIntervalWidth = 0.80,
   # Conservative default: span all selected high-density modes.
@@ -419,12 +421,31 @@ uncompressed or shell-processed.</p>
   peakResampleIterations = 1000,
   randomSeed = 1,
   pairedEnd = FALSE,
-  ignoreStrand = FALSE
+  ignoreStrand = FALSE,
+  expressionPseudocount = 0.01,
+  # Export the evaluated AICc span curve for each fitted chromosome.
+  exportAiccPlots = FALSE
 )</code></pre>
+<p>Candidate pileup uses <code>candidatePoolMode=&quot;auto&quot;</code> by default.
+The auto mode keeps the fast single-pileup path when the refined interval is
+comfortably sized for available memory, including container/cgroup limits on
+Linux, and switches to bounded genomic chunks only when useful. In
+bounded-memory mode, BAMs are pooled incrementally so all per-BAM pileup tables
+do not need to coexist in memory; WT support for candidate loci uses the same
+strategy. <code>candidateChunkSize=0</code> selects an adaptive chunk width; a
+positive value supplies an explicit maximum chunk width.
+<code>candidatePoolMode=&quot;memory&quot;</code> prefers a one-shot pileup, while
+<code>&quot;chunked&quot;</code> always uses bounded chunks. If an actual allocation
+failure occurs on the fast mutant path, MMAPPR2 retries with smaller chunks and
+uses temporary RDS files under R’s <code>tempdir()</code> for already-filtered chunk results. Those files are
+uniquely named and removed automatically.</p>
+<p>When <code>exportAiccPlots=TRUE</code>, <code>outputMmapprData()</code> writes
+<code>aicc_plots.pdf</code> from the AICc evaluations already stored by
+<code>loessFit()</code>; the export step does not rerun model fitting.</p>
 <p>The two peak-method parameters are intentionally explicit because
 changing them changes the statistical interpretation of a run.
-<code>peakCutoffMethod=&quot;legacy_current&quot;</code> preserves the supplied
-GitHub-main cutoff calculation; <code>&quot;global_sd&quot;</code> instead uses
+<code>peakCutoffMethod=&quot;legacy_current&quot;</code> uses the compatibility
+cutoff calculation; <code>&quot;global_sd&quot;</code> instead uses
 the genome-wide median of fitted values plus <code>peakCutoffSd</code>
 times their ordinary standard deviation. Likewise,
 <code>peakIntervalMethod=&quot;hpd_span&quot;</code> spans all KDE grid locations
@@ -433,10 +454,12 @@ selected by the high-density mass rule, whereas
 interval and can intentionally exclude a secondary mode.</p>
 <p>For paired-end RNA-seq, set <code>pairedEnd=TRUE</code> so the
 descriptive expression summary counts fragments appropriately.
-<code>ignoreStrand=FALSE</code> preserves the original strand-aware
-<code>summarizeOverlaps()</code> behavior. The expression output is a
-raw-count fold-change summary, <strong>not</strong> a formal
-DESeq2/edgeR differential-expression test.</p>
+<code>ignoreStrand=FALSE</code> uses strand-aware
+<code>summarizeOverlaps()</code> counting. The descriptive expression
+log2 fold change adds a small pseudocount of 0.01 to both pool means by
+default, preventing Inf/NaN values when a mean count is zero. Set
+<code>expressionPseudocount=0</code> to request the raw ratio. This output
+is <strong>not</strong> a formal DESeq2/edgeR differential-expression test.</p>
 </div>
 <div id="run-the-pipeline" class="section level1">
 <h1>Run the pipeline</h1>
@@ -450,34 +473,36 @@ md &lt;- peakRefinement(md)     # reproducible half-marker resampling
 md &lt;- generateCandidates(md) # mutant SNVs + WT evidence + coding effects
 outputMmapprData(md)</code></pre>
 </div>
-<div id="what-the-revised-candidate-stage-reports" class="section level1">
-<h1>What the revised candidate stage reports</h1>
+<div id="candidate-stage-output" class="section level1">
+<h1>Candidate-stage output</h1>
 <p>The current lightweight candidate caller is still SNV-focused. For
 each candidate it records mutant depth/allele frequency and WT
 depth/allele frequency. A variant whose ALT allele is high-frequency in
 both pools is marked <code>sharedBackgroundLike</code> as reporting
-metadata. In the frozen branch this flag does <strong>not</strong>
-change the default candidate order.</p>
-<p>The archive writes:</p>
+metadata. By default this flag does <strong>not</strong>
+change the candidate order. If either WT-specific hard filter is enabled,
+candidates without finite WT evidence for that filter do not pass it; the
+permissive defaults avoid that low-coverage exclusion.</p>
+<p>MMAPPR2 writes:</p>
 <ul>
 <li><code>AllCandidateVariantsFor&lt;seq&gt;.tsv</code>: all retained
 SNV candidates, including noncoding candidates and WT-vs-mutant
 evidence;</li>
 <li><code>DetectedMutationsFor&lt;seq&gt;.tsv</code>: coding
-consequences from <code>predictCoding()</code> (original filename
-restored);</li>
+consequences from <code>predictCoding()</code> (established filename preserved);</li>
 <li><code>DifferentiallyExpressedGenesFor&lt;seq&gt;.tsv</code>: the
 historical filename for the descriptive raw-count fold-change
 screen;</li>
 <li><code>genome_plots.pdf</code>, <code>peak_plots.pdf</code>,
-<code>mmappr2.log</code>, and <code>mmappr_data.RDS</code>.</li>
+<code>mmappr2.log</code>, and <code>mmappr_data.RDS</code>;</li>
+<li><code>aicc_plots.pdf</code> when <code>exportAiccPlots=TRUE</code> and finite
+AICc search results are available.</li>
 </ul>
 </div>
-<div id="deliberate-remaining-methodological-limits" class="section level1">
-<h1>Deliberate remaining methodological limits</h1>
-<p>This maintenance revision does <strong>not</strong> pretend to solve
-changes that require a larger, validated scientific redesign. In
-particular:</p>
+<div id="current-methodological-limits" class="section level1">
+<h1>Current methodological limits</h1>
+<p>Some analyses require a larger, separately validated methodological
+extension. In particular:</p>
 <ul>
 <li>exact indel/haplotype-aware candidate calling is not
 implemented;</li>
@@ -492,9 +517,6 @@ where observable, but only coding SNV effects receive
 <code>predictCoding()</code> annotations;</li>
 <li>the expression summary is descriptive rather than inferential.</li>
 </ul>
-<p>See <code>CHANGE_ANNOTATION_INDEX.md</code> for a detailed
-maintenance/change log and the distinction between fixed bugs and larger
-methodological work.</p>
 </div>
 
 

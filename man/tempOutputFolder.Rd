@@ -1,4 +1,4 @@
-% Manually synchronized with R/output.R in the revised archive.
+% Manually synchronized with R/output.R.
 \name{tempOutputFolder}
 \alias{tempOutputFolder}
 \title{Generate a temporary MMAPPR2 output path}

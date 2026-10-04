@@ -14,17 +14,14 @@ setGeneric("peakIntervalWidth", function(obj) standardGeneric("peakIntervalWidth
 setGeneric("loessOptResolution", function(obj) standardGeneric("loessOptResolution"))
 setGeneric("loessOptCutFactor", function(obj) standardGeneric("loessOptCutFactor"))
 
-# [CHANGE — PUBLIC ANALYSIS-PARAMETER API]
-# The new implementation adds getters for analysis choices that were hard-coded inside the old implementation:
-# linkage pileup depth; candidate depth/frequency and optional WT filters; peak
-# cutoff/interval/resampling controls; RNG seed; and expression counting controls.
-# Storing them in MmapprParam makes the exact run configuration serializable.
 setGeneric("maxPileupDepth", function(obj) standardGeneric("maxPileupDepth"))
 setGeneric("candidateMinDepth", function(obj) standardGeneric("candidateMinDepth"))
 setGeneric("candidateMinAltDepth", function(obj) standardGeneric("candidateMinAltDepth"))
 setGeneric("candidateMinAltFreq", function(obj) standardGeneric("candidateMinAltFreq"))
 setGeneric("candidateMaxWtAltFreq", function(obj) standardGeneric("candidateMaxWtAltFreq"))
 setGeneric("candidateMinDeltaAF", function(obj) standardGeneric("candidateMinDeltaAF"))
+setGeneric("candidatePoolMode", function(obj) standardGeneric("candidatePoolMode"))
+setGeneric("candidateChunkSize", function(obj) standardGeneric("candidateChunkSize"))
 setGeneric("peakCutoffSd", function(obj) standardGeneric("peakCutoffSd"))
 setGeneric("peakCutoffMethod", function(obj) standardGeneric("peakCutoffMethod"))
 setGeneric("peakIntervalMethod", function(obj) standardGeneric("peakIntervalMethod"))
@@ -33,6 +30,7 @@ setGeneric("randomSeed", function(obj) standardGeneric("randomSeed"))
 setGeneric("pairedEnd", function(obj) standardGeneric("pairedEnd"))
 setGeneric("ignoreStrand", function(obj) standardGeneric("ignoreStrand"))
 setGeneric("expressionPseudocount", function(obj) standardGeneric("expressionPseudocount"))
+setGeneric("exportAiccPlots", function(obj) standardGeneric("exportAiccPlots"))
 
 setGeneric("wtFiles<-", function(obj, value) standardGeneric("wtFiles<-"))
 setGeneric("mutFiles<-", function(obj, value) standardGeneric("mutFiles<-"))
@@ -49,16 +47,14 @@ setGeneric("distancePower<-", function(obj, value) standardGeneric("distancePowe
 setGeneric("peakIntervalWidth<-", function(obj, value) standardGeneric("peakIntervalWidth<-"))
 setGeneric("loessOptResolution<-", function(obj, value) standardGeneric("loessOptResolution<-"))
 setGeneric("loessOptCutFactor<-", function(obj, value) standardGeneric("loessOptCutFactor<-"))
-# [CHANGE — VALIDATED REPLACEMENT API]
-# The old API had no setters for the newly exposed analysis controls because those controls were
-# hard-coded. The new API adds matching replacement generics whose methods re-run parameter validation
-# instead of requiring direct slot mutation.
 setGeneric("maxPileupDepth<-", function(obj, value) standardGeneric("maxPileupDepth<-"))
 setGeneric("candidateMinDepth<-", function(obj, value) standardGeneric("candidateMinDepth<-"))
 setGeneric("candidateMinAltDepth<-", function(obj, value) standardGeneric("candidateMinAltDepth<-"))
 setGeneric("candidateMinAltFreq<-", function(obj, value) standardGeneric("candidateMinAltFreq<-"))
 setGeneric("candidateMaxWtAltFreq<-", function(obj, value) standardGeneric("candidateMaxWtAltFreq<-"))
 setGeneric("candidateMinDeltaAF<-", function(obj, value) standardGeneric("candidateMinDeltaAF<-"))
+setGeneric("candidatePoolMode<-", function(obj, value) standardGeneric("candidatePoolMode<-"))
+setGeneric("candidateChunkSize<-", function(obj, value) standardGeneric("candidateChunkSize<-"))
 setGeneric("peakCutoffSd<-", function(obj, value) standardGeneric("peakCutoffSd<-"))
 setGeneric("peakCutoffMethod<-", function(obj, value) standardGeneric("peakCutoffMethod<-"))
 setGeneric("peakIntervalMethod<-", function(obj, value) standardGeneric("peakIntervalMethod<-"))
@@ -67,6 +63,7 @@ setGeneric("randomSeed<-", function(obj, value) standardGeneric("randomSeed<-"))
 setGeneric("pairedEnd<-", function(obj, value) standardGeneric("pairedEnd<-"))
 setGeneric("ignoreStrand<-", function(obj, value) standardGeneric("ignoreStrand<-"))
 setGeneric("expressionPseudocount<-", function(obj, value) standardGeneric("expressionPseudocount<-"))
+setGeneric("exportAiccPlots<-", function(obj, value) standardGeneric("exportAiccPlots<-"))
 
 setGeneric("param", function(obj) standardGeneric("param"))
 setGeneric("param<-", function(obj, value) standardGeneric("param<-"))

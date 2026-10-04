@@ -1,20 +1,19 @@
 ---
-title: "MMAPPR2 revised-current workflow"
-author: "Annotated maintenance revision"
+title: "MMAPPR2 workflow"
+author: "Kyle Johnsen, Nathaniel Jenkins, and Jonathon Hill"
 output: html_document
 vignette: >
-  %\VignetteIndexEntry{MMAPPR2 revised-current workflow}
+  %\VignetteIndexEntry{MMAPPR2 workflow}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
 # Scope
 
-This vignette describes the **current R implementation in this revised archive**. The
-vignette that accompanied the uploaded source still described an older MMAPPR2 design
-based on GMAP, external `samtools mpileup`, Ensembl VEP, `species`, and `VEPFlags`.
-Those interfaces are not part of the current code and have therefore been removed from
-this vignette.
+This vignette describes the current MMAPPR2 workflow and its public analysis controls.
+MMAPPR2 uses Bioconductor APIs for BAM/FASTA access and local coding-effect annotation;
+external GMAP, command-line `samtools mpileup`, Ensembl VEP, `species`, and `VEPFlags`
+are not required by the current workflow.
 
 MMAPPR2 maps a phenotype from pooled F2 RNA-seq in two conceptual phases:
 
@@ -25,7 +24,7 @@ MMAPPR2 maps a phenotype from pooled F2 RNA-seq in two conceptual phases:
 
 # Inputs
 
-The revised constructor expects:
+The constructor expects:
 
 - one or more WT-pool BAM files;
 - one or more mutant-pool BAM files;
@@ -64,8 +63,11 @@ param <- mmapprParam(
   # still reported for every candidate but does not change the default candidate ordering.
   candidateMaxWtAltFreq = 1.00,
   candidateMinDeltaAF = 0.00,
+  # Keep the fast one-shot pileup when it fits; otherwise chunk adaptively.
+  candidatePoolMode = "auto",
+  candidateChunkSize = 0,
   peakCutoffSd = 3,
-  # Default: use the old cutoff calculation; "global_sd" selects the new alternative.
+  # Default: use the compatibility cutoff; "global_sd" selects the genome-wide-SD alternative.
   peakCutoffMethod = "legacy_current",
   peakIntervalWidth = 0.80,
   # Conservative default: span all selected high-density modes.
@@ -73,23 +75,43 @@ param <- mmapprParam(
   peakResampleIterations = 1000,
   randomSeed = 1,
   pairedEnd = FALSE,
-  ignoreStrand = FALSE
+  ignoreStrand = FALSE,
+  expressionPseudocount = 0.01,
+  # Export the evaluated AICc span curve for each fitted chromosome.
+  exportAiccPlots = FALSE
 )
 ```
 
 
+Candidate pileup uses `candidatePoolMode="auto"` by default. The auto mode keeps the
+fast single-pileup path when the refined interval is comfortably sized for available
+memory, including container/cgroup limits on Linux, and switches to bounded genomic
+chunks only when useful. In bounded-memory mode, BAMs are pooled incrementally so all
+per-BAM pileup tables do not need to coexist in memory; WT support for candidate loci
+uses the same strategy. `candidateChunkSize=0` selects an adaptive chunk width; a
+positive value supplies an explicit maximum chunk width. `candidatePoolMode="memory"`
+prefers a one-shot pileup, while `"chunked"` always uses bounded chunks. If an actual
+allocation failure occurs on the fast mutant path, MMAPPR2 retries with smaller chunks
+and uses temporary RDS files under R's `tempdir()` for already-filtered chunk results.
+Those files are uniquely named and removed automatically.
+
+When `exportAiccPlots=TRUE`, `outputMmapprData()` writes `aicc_plots.pdf` from the AICc
+evaluations already stored by `loessFit()`; the export step does not rerun model fitting.
+
 The two peak-method parameters are intentionally explicit because changing them changes
 the statistical interpretation of a run. `peakCutoffMethod="legacy_current"` preserves
-the old cutoff calculation; `"global_sd"` instead uses the genome-wide
+the compatibility cutoff calculation; `"global_sd"` instead uses the genome-wide
 median of fitted values plus `peakCutoffSd` times their ordinary standard deviation.
 Likewise, `peakIntervalMethod="hpd_span"` spans all KDE grid locations selected by the
 high-density mass rule, whereas `"shortest_contiguous"` chooses one shortest contiguous
 interval and can intentionally exclude a secondary mode.
 
 For paired-end RNA-seq, set `pairedEnd=TRUE` so the descriptive expression summary
-counts fragments appropriately. `ignoreStrand=FALSE` preserves the old strand-aware
-`summarizeOverlaps()` behavior. The expression output is a raw-count fold-change
-summary, **not** a formal DESeq2/edgeR differential-expression test.
+counts fragments appropriately. `ignoreStrand=FALSE` uses strand-aware
+`summarizeOverlaps()` counting. The descriptive expression log2 fold change adds a
+small pseudocount of 0.01 to both pool means by default, preventing Inf/NaN values
+when a mean count is zero. Set `expressionPseudocount=0` to request the raw ratio.
+This output is **not** a formal DESeq2/edgeR differential-expression test.
 
 # Run the pipeline
 
@@ -109,25 +131,27 @@ md <- generateCandidates(md) # mutant SNVs + WT evidence + coding effects
 outputMmapprData(md)
 ```
 
-# What the revised candidate stage reports
+# Candidate-stage output
 
 The current lightweight candidate caller is still SNV-focused. For each candidate it
 records mutant depth/allele frequency and WT depth/allele frequency. A variant whose
 ALT allele is high-frequency in both pools is marked `sharedBackgroundLike` as reporting
 metadata. By default this flag does **not** change the candidate order.
+If either WT-specific hard filter is enabled, candidates without finite WT evidence for
+that filter do not pass it; the permissive defaults avoid that low-coverage exclusion.
 
-The archive writes:
+MMAPPR2 writes:
 
 - `AllCandidateVariantsFor<seq>.tsv`: all retained SNV candidates, including noncoding
   candidates and WT-vs-mutant evidence;
 - `DetectedMutationsFor<seq>.tsv`: coding consequences from `predictCoding()` (established filename preserved);
 - `DifferentiallyExpressedGenesFor<seq>.tsv`: the historical filename for the descriptive raw-count fold-change screen;
-- `genome_plots.pdf`, `peak_plots.pdf`, `mmappr2.log`, and `mmappr_data.RDS`.
+- `genome_plots.pdf`, `peak_plots.pdf`, `mmappr2.log`, and `mmappr_data.RDS`;
+- `aicc_plots.pdf` when `exportAiccPlots=TRUE` and finite AICc search results are available.
 
-# Deliberate remaining methodological limits
+# Current methodological limits
 
-The new implementation does **not** attempt to solve changes that require a larger,
-validated scientific redesign. In particular:
+Some analyses require a larger, separately validated methodological extension. In particular:
 
 - exact indel/haplotype-aware candidate calling is not implemented;
 - the peak data model still represents one dominant refined locus per chromosome;
@@ -139,5 +163,3 @@ validated scientific redesign. In particular:
   but only coding SNV effects receive `predictCoding()` annotations;
 - the expression summary is descriptive rather than inferential.
 
-See `CHANGE_ANNOTATION_INDEX.md` for a detailed old-to-new change map and the distinction
-between implementation fixes and larger methodological work.

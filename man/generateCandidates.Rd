@@ -1,4 +1,4 @@
-% Manually synchronized with R/candidates.R in the hardened revision.
+% Manually synchronized with R/candidates.R.
 \name{generateCandidates}
 \alias{generateCandidates}
 \title{Generate and annotate candidate variants in refined peak regions}

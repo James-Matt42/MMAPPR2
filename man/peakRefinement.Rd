@@ -1,4 +1,4 @@
-% Manually synchronized with R/peaks.R in the hardened revision.
+% Manually synchronized with R/peaks.R.
 \name{peakRefinement}
 \alias{peakRefinement}
 \title{Refine linkage peaks using marker resampling}

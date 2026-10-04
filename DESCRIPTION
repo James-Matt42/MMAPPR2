@@ -1,6 +1,6 @@
 Package: MMAPPR2
 Title: Mutation Mapping Analysis Pipeline for Pooled RNA-Seq
-Version: 0.99.24.9008
+Version: 0.99.24.9009
 Authors@R: c(
     person("Kyle", "Johnsen", email = "kjohnsen@byu.edu", role = "aut"),
     person("Nathaniel", "Jenkins", role = "aut"),
@@ -11,10 +11,9 @@ Description: Maps candidate causal loci from pooled F2 RNA-seq in forward
     the linkage signal with LOESS, refines linked intervals by marker
     resampling, calls high-frequency candidate SNVs in mutant reads, reports
     wild-type allele support, predicts coding consequences locally, and writes
-    diagnostic plots and candidate tables. This development maintenance
-    revision also hardens input validation, reproducibility, RNA-seq pileup
-    handling, and regression testing while retaining compatibility-oriented
-    defaults for the existing linkage model.
+    diagnostic plots and candidate tables. The implementation includes robust
+    input validation, reproducible peak refinement, RNA-seq-aware pileup
+    handling, and regression-tested analysis helpers.
 Depends: R (>= 4.4.0)
 License: GPL-3
 Encoding: UTF-8

@@ -1,3 +1,14 @@
+CHANGES IN DEVELOPMENT VERSION
+------------------------------
+
++ Candidate memory detection treats an exhausted container/cgroup limit conservatively rather than falling back to the host memory value, and the adaptive planner reserves additional headroom for temporary pileup/aggregation copies.
+
++ Candidate SNV pileup now uses an adaptive memory strategy. Modest intervals on machines with sufficient available memory retain the fast one-shot in-memory path; large intervals or constrained systems are processed in bounded genomic chunks. Bounded-memory chunks pool BAMs incrementally, WT candidate support uses the same adaptive strategy, and temporary-disk staging is used as an emergency fallback after a mutant-pileup allocation failure. `candidatePoolMode` and `candidateChunkSize` expose the strategy when explicit control is needed.
+
++ AICc span-search diagnostics retained by `loessFit()` can now be exported to `aicc_plots.pdf` by setting `exportAiccPlots=TRUE`. Exporting does not rerun the LOESS search.
+
++ Descriptive expression log2 fold change now uses a 0.01 pseudocount by default; set `expressionPseudocount=0` to request the raw ratio.
+
 CHANGES IN VERSION 0.99.0
 -------------------------
 

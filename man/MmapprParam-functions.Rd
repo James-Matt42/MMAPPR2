@@ -1,4 +1,4 @@
-% Manually synchronized with R/param.R in the hardened revision.
+% Manually synchronized with R/param.R.
 \name{MmapprParam-functions}
 \alias{MmapprParam-functions}
 \alias{wtFiles}
@@ -85,6 +85,14 @@
 \alias{candidateMinDeltaAF<-}
 \alias{candidateMinDeltaAF,MmapprParam-method}
 \alias{candidateMinDeltaAF<-,MmapprParam-method}
+\alias{candidatePoolMode}
+\alias{candidatePoolMode<-}
+\alias{candidatePoolMode,MmapprParam-method}
+\alias{candidatePoolMode<-,MmapprParam-method}
+\alias{candidateChunkSize}
+\alias{candidateChunkSize<-}
+\alias{candidateChunkSize,MmapprParam-method}
+\alias{candidateChunkSize<-,MmapprParam-method}
 \alias{peakCutoffSd}
 \alias{peakCutoffSd<-}
 \alias{peakCutoffSd,MmapprParam-method}
@@ -117,6 +125,10 @@
 \alias{expressionPseudocount<-}
 \alias{expressionPseudocount,MmapprParam-method}
 \alias{expressionPseudocount<-,MmapprParam-method}
+\alias{exportAiccPlots}
+\alias{exportAiccPlots<-}
+\alias{exportAiccPlots,MmapprParam-method}
+\alias{exportAiccPlots<-,MmapprParam-method}
 \title{MmapprParam getters and validated setters}
 \usage{
 \S4method{wtFiles}{MmapprParam}(obj)
@@ -140,6 +152,8 @@
 \S4method{candidateMinAltFreq}{MmapprParam}(obj)
 \S4method{candidateMaxWtAltFreq}{MmapprParam}(obj)
 \S4method{candidateMinDeltaAF}{MmapprParam}(obj)
+\S4method{candidatePoolMode}{MmapprParam}(obj)
+\S4method{candidateChunkSize}{MmapprParam}(obj)
 \S4method{peakCutoffSd}{MmapprParam}(obj)
 \S4method{peakCutoffMethod}{MmapprParam}(obj)
 \S4method{peakIntervalMethod}{MmapprParam}(obj)
@@ -148,6 +162,7 @@
 \S4method{pairedEnd}{MmapprParam}(obj)
 \S4method{ignoreStrand}{MmapprParam}(obj)
 \S4method{expressionPseudocount}{MmapprParam}(obj)
+\S4method{exportAiccPlots}{MmapprParam}(obj)
 \S4method{wtFiles}{MmapprParam}(obj) <- value
 \S4method{mutFiles}{MmapprParam}(obj) <- value
 \S4method{refFasta}{MmapprParam}(obj) <- value
@@ -169,6 +184,8 @@
 \S4method{candidateMinAltFreq}{MmapprParam}(obj) <- value
 \S4method{candidateMaxWtAltFreq}{MmapprParam}(obj) <- value
 \S4method{candidateMinDeltaAF}{MmapprParam}(obj) <- value
+\S4method{candidatePoolMode}{MmapprParam}(obj) <- value
+\S4method{candidateChunkSize}{MmapprParam}(obj) <- value
 \S4method{peakCutoffSd}{MmapprParam}(obj) <- value
 \S4method{peakCutoffMethod}{MmapprParam}(obj) <- value
 \S4method{peakIntervalMethod}{MmapprParam}(obj) <- value
@@ -177,6 +194,7 @@
 \S4method{pairedEnd}{MmapprParam}(obj) <- value
 \S4method{ignoreStrand}{MmapprParam}(obj) <- value
 \S4method{expressionPseudocount}{MmapprParam}(obj) <- value
+\S4method{exportAiccPlots}{MmapprParam}(obj) <- value
 }
 \arguments{
 \item{obj}{A \code{MmapprParam} object.}

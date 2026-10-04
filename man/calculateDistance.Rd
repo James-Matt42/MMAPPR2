@@ -1,4 +1,4 @@
-% Manually synchronized with R/distance.R in the revised archive.
+% Manually synchronized with R/distance.R.
 \name{calculateDistance}
 \alias{calculateDistance}
 \title{Read BAM files and generate Euclidean-distance linkage data}

@@ -6,10 +6,11 @@
     loessOptCutFactor = .1, maxPileupDepth = 1000, candidateMinDepth = 1,
     candidateMinAltDepth = 2, candidateMinAltFreq = .80,
     candidateMaxWtAltFreq = 1, candidateMinDeltaAF = 0,
+    candidatePoolMode = "auto", candidateChunkSize = 0,
     peakCutoffSd = 3, peakCutoffMethod = "legacy_current",
     peakIntervalMethod = "hpd_span", peakResampleIterations = 1000,
     randomSeed = 1, pairedEnd = FALSE, ignoreStrand = FALSE,
-    expressionPseudocount = 0, nMutFiles = 1L
+    expressionPseudocount = 0.01, exportAiccPlots = FALSE, nMutFiles = 1L
   )
 }
 
@@ -52,6 +53,15 @@ test_that("invalid scientific-method names are rejected", {
   a <- .base_scalar_args(); a$peakIntervalMethod <- "mystery"
   expect_match(paste(do.call(MMAPPR2:::.validateScalarValues, a), collapse = " "),
                "peakIntervalMethod")
+})
+
+test_that("candidate memory controls are validated", {
+  a <- .base_scalar_args(); a$candidatePoolMode <- "mystery"
+  expect_match(paste(do.call(MMAPPR2:::.validateScalarValues, a), collapse = " "),
+               "candidatePoolMode")
+  a <- .base_scalar_args(); a$candidateChunkSize <- -1
+  expect_match(paste(do.call(MMAPPR2:::.validateScalarValues, a), collapse = " "),
+               "candidateChunkSize")
 })
 
 
@@ -152,11 +162,14 @@ test_that("invalid BAM input cannot clear an existing output directory", {
 })
 
 
-test_that("frozen public defaults preserve original candidate and expression semantics", {
+test_that("public defaults include safe candidate pooling, AICc export, and the expression pseudocount", {
   f <- formals(MMAPPR2::mmapprParam)
   expect_equal(eval(f$candidateMinDepth), 1)
+  expect_identical(eval(f$candidatePoolMode)[1], "auto")
+  expect_equal(eval(f$candidateChunkSize), 0)
   expect_false(eval(f$ignoreStrand))
-  expect_equal(eval(f$expressionPseudocount), 0)
+  expect_equal(eval(f$expressionPseudocount), 0.01)
+  expect_false(eval(f$exportAiccPlots))
 })
 
 test_that("BAM/reference mismatch cannot clear prior output", {

@@ -32,17 +32,10 @@
 NULL
 
 
-# [CHANGE — OUTPUT/RECOVERY CONTRACT FIXES]
-# The new implementation repairs the missing-output-directory recovery branch (the old implementation passed a
-# MmapprData object where a path was expected), closes only graphics devices opened
-# by this function, writes the richer candidate tables through safe serializers,
-# and returns the documented MmapprData object invisibly rather than integer 1.
 outputMmapprData <- function(mmapprData) {
   stopifnot(is(mmapprData, "MmapprData"))
   
   if (!dir.exists(outputFolder(param(mmapprData)))) {
-    # [FIX] The old recovery branch passed the entire MmapprData object to a
-    # function expecting a path, then overwrote mmapprData with the returned path.
     dir.create(outputFolder(param(mmapprData)), recursive = TRUE, showWarnings = FALSE)
   }
   current_devs = dev.list() # get open graphics devices to help cleanup
@@ -50,6 +43,7 @@ outputMmapprData <- function(mmapprData) {
     tryCatch({
       .plotGenomeDistance(mmapprData)
       .plotPeaks(mmapprData)
+      if (isTRUE(exportAiccPlots(param(mmapprData)))) .plotAicc(mmapprData)
     }, finally = {
       now <- dev.list()
       opened_devs <- if (is.null(now)) integer() else now[!(now %in% current_devs)]
@@ -64,16 +58,65 @@ outputMmapprData <- function(mmapprData) {
                           outputFolder(param(mmapprData)))
   }
   
-  # [FIX] Return the object documented by the public API, invisibly so scripts
+  # Return the object documented by the public API, invisibly so scripts
   # can chain output without noisy printing.
   invisible(mmapprData)
 }
 
 
-# [CHANGE — ATOMIC RDS CHECKPOINT HELPER]
-# The old checkpoint path wrote directly to the target RDS, so interruption could leave a partial file.
-# The new helper writes and verifies a same-directory temporary RDS before replacement; when direct
-# overwrite-by-rename is unavailable, it preserves the old target and restores it on failure.
+# Export the AICc evaluations retained by loessFit(). One page is written per
+# successfully fitted chromosome, with all finite evaluated spans shown and the
+# selected span highlighted. This is output-only: it never reruns a LOESS fit or
+# changes the optimized result stored in the MmapprData object.
+.plotAicc <- function(mmapprData) {
+  usable <- names(mmapprData@snpDistance)[vapply(
+    mmapprData@snpDistance,
+    function(x) is.list(x) && is.data.frame(x$aicc) &&
+      all(c("spans", "aiccValues") %in% names(x$aicc)) &&
+      any(is.finite(x$aicc$aiccValues)),
+    logical(1)
+  )]
+  if (!length(usable)) {
+    warning("AICc plot export was requested, but no finite AICc search results are available")
+    return(invisible(NULL))
+  }
+
+  grDevices::pdf(file.path(outputFolder(param(mmapprData)), "aicc_plots.pdf"),
+                 width = 8.5, height = 6.5)
+  deviceOpen <- TRUE
+  on.exit(if (deviceOpen) try(grDevices::dev.off(), silent = TRUE), add = TRUE)
+
+  for (seqname in usable) {
+    result <- mmapprData@snpDistance[[seqname]]
+    tab <- result$aicc
+    ok <- is.finite(tab$spans) & is.finite(tab$aiccValues)
+    tab <- tab[ok, , drop = FALSE]
+    tab <- tab[order(tab$spans), , drop = FALSE]
+    if (!nrow(tab)) next
+
+    graphics::plot(tab$spans, tab$aiccValues, type = "b", pch = 16,
+                   xlab = "LOESS span", ylab = "AICc",
+                   main = paste(seqname, "LOESS span optimization"),
+                   xlim = .safeXLim(tab$spans), ylim = .safeYLim(tab$aiccValues))
+
+    best <- result$bestSpan
+    if (length(best) == 1L && is.finite(best)) {
+      nearest <- which.min(abs(tab$spans - best))
+      graphics::abline(v = best, lty = 2)
+      graphics::points(tab$spans[nearest], tab$aiccValues[nearest],
+                       pch = 19, cex = 1.4)
+      graphics::legend("topright",
+                       legend = sprintf("selected span = %s", format(best)),
+                       lty = 2, pch = 19, bty = "n")
+    }
+  }
+
+  grDevices::dev.off()
+  deviceOpen <- FALSE
+  invisible(NULL)
+}
+
+
 .atomicSaveRDS <- function(object, file, .renameFile = file.rename) {
   dir <- dirname(file)
   if (!dir.exists(dir)) stop("RDS destination directory does not exist: ", dir)
@@ -85,11 +128,6 @@ outputMmapprData <- function(mmapprData) {
   if (!file.exists(tmp) || is.na(info$size) || info$size <= 0)
     stop("Temporary RDS serialization failed: ", tmp)
 
-  # Same-directory rename replaces atomically on normal POSIX filesystems. Some
-  # platforms (notably Windows) refuse to rename over an existing destination.
-  # In that case move the old readable file aside first, then restore it if the
-  # completed temporary file still cannot be installed. Never delete the only
-  # readable prior state before the replacement succeeds.
   if (!.renameFile(tmp, file)) {
     if (!file.exists(file))
       stop("Could not move completed RDS into place: ", file)
@@ -119,13 +157,9 @@ outputMmapprData <- function(mmapprData) {
 }
 
 
-# [CHANGE — COLLISION-RESISTANT OUTPUT NAMES]
-# The old implementation used a timestamp alone, so runs started in the same second could
-# collide. The new implementation uses tempfile-generated unique suffixes for default and temporary
-# output paths without consuming the analysis RNG stream.
 .defaultOutputFolder <- function() {
   stamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
-  # [IMPROVE] tempfile() adds a collision-resistant suffix without consuming R's
+  # tempfile() adds a collision-resistant suffix without consuming R's
   # random-number stream, so two analyses started in the same second do not clash.
   basename(tempfile(pattern = paste0("mmappr2_", stamp, "_"), tmpdir = getwd()))
 }
@@ -133,6 +167,7 @@ outputMmapprData <- function(mmapprData) {
 
 #' @title Generate temporary output folder
 #' @name tempOutputFolder
+#' @description
 #' Returns a unique temporary output-directory path. The directory is created
 #' by \code{mmapprParam()} when the parameter object is constructed.
 #'
@@ -158,12 +193,6 @@ tempOutputFolder <- function() {
 }
 
 
-# [CHANGE — NONINTERACTIVE, PROTECTED OVERWRITE]
-# The old implementation prompted interactively and could recursively clear an existing
-# directory after a single response. The new implementation requires explicit overwrite=TRUE, refuses
-# root/top-level/home/current/temp-session directories, verifies clearing succeeds,
-# creates paths recursively, normalizes the accepted path, and creates the log file
-# without interactive input.
 .prepareOutputFolder <- function(outputFolder, overwrite = FALSE) {
   if (!is.character(outputFolder) || length(outputFolder) != 1L || !nzchar(outputFolder))
     stop("outputFolder must be one non-empty path")
@@ -171,9 +200,6 @@ tempOutputFolder <- function() {
   if (dir.exists(outputFolder)) {
     existingPath <- normalizePath(outputFolder, mustWork = TRUE)
 
-    # [FIX] Evaluate overwrite safety before checking directory contents. The
-    # old implementation had no protected-path rule; the new rule applies even
-    # when the target is empty, because safety is a property of the path itself.
     if (isTRUE(overwrite)) {
       protected <- unique(normalizePath(c(path.expand("~"), getwd(), tempdir()),
                                         mustWork = TRUE))
@@ -209,11 +235,8 @@ tempOutputFolder <- function() {
 
 
 
-# [CHANGE — DEGENERATE PLOT LIMIT GUARDS]
-# The old plotting code constructed limits directly from min/max values, which can fail for constant,
-# empty, or non-finite data. The new helpers return finite non-zero-width limits for those edge cases.
 .safeYLim <- function(x, upperPad = 0.10) {
-  # [FIX] Base plot() rejects zero-width or non-finite limits. Constant/degenerate
+  # Base plot() rejects zero-width or non-finite limits. Constant/degenerate
   # fits can occur on small datasets, so construct a finite visible range.
   x <- x[is.finite(x)]
   if (length(x) == 0L) return(c(0, 1))
@@ -236,10 +259,9 @@ tempOutputFolder <- function() {
   c(lo, hi)
 }
 
-# [CHANGE — GENOME-PLOT HARDENING/METADATA]
-# The old genome plot used raw min/max limits and did not display peak-cutoff/refined-region metadata.
-# The new plot uses safe limits, normalized numeric LOESS coordinates, namespaced sequence ordering, and
-# explicit cutoff/region overlays; device handling also avoids closing unrelated user devices.
+# Genome-level plotting uses safe limits, normalized numeric LOESS coordinates, and
+# namespaced sequence ordering. Peak-cutoff/refined-region diagnostics are drawn by
+# .plotPeaks(); device handling here avoids closing unrelated user devices.
 .plotGenomeDistance <- function(mmapprData, savePdf = TRUE) {
   #generate one big dataframe for plots, along with break and label points
   tailPos <- 0
@@ -308,11 +330,6 @@ tempOutputFolder <- function() {
 }
 
 
-# [CHANGE — REFINED-PEAK DIAGNOSTICS]
-# The old peak plot shaded to a hard-coded -5 baseline, omitted the initial cutoff, and labeled the KDE
-# overlay as probability while relying on raw ranges. The new plot shades from the actual plotting
-# baseline, shows the stored cutoff, handles degenerate density support safely, and labels the overlay
-# as density.
 .plotPeaks <- function(mmapprData) {
   if (length(mmapprData@peaks) == 0L) return(invisible(NULL))
   pdf(file.path(mmapprData@param@outputFolder, "peak_plots.pdf"),
@@ -342,7 +359,7 @@ tempOutputFolder <- function() {
 
     inside <- chrX >= start & chrX <= end & is.finite(fitted)
     if (any(inside)) {
-      # [FIX] Shade to the actual plot baseline rather than an arbitrary -5,
+      # Shade to the actual plot baseline rather than an arbitrary -5,
       # which could distort clipping when the plotted range is small/positive.
       shadeX <- c(start, chrX[inside], end)
       shadeY <- c(yLim[1], fitted[inside], yLim[1])
@@ -389,16 +406,6 @@ tempOutputFolder <- function() {
 
 
 
-# Convert Bioconductor-rich table columns into values that base write.table() can
-# serialize reliably. VariantAnnotation/GenomicRanges metadata can contain List,
-# DNAStringSet, IRanges, or other vector-like columns; base write.table() errors on
-# genuine list columns ("unimplemented type 'list'"). Atomic columns are preserved
-# as-is so numeric depths/frequencies stay numeric in the TSV.
-# [CHANGE — ROBUST TSV SERIALIZATION]
-# Old write.table() calls can fail on VariantAnnotation/GenomicRanges list-like
-# metadata. The new implementation flattens only non-atomic cells deterministically, sanitizes embedded
-# tabs/newlines, preserves ordinary numeric columns, and handles zero-row list
-# columns so header-only result files still serialize correctly.
 .tsvSafeDataFrame <- function(x) {
   df <- as.data.frame(x)
   # Even a zero-row table can contain a list/List column whose class makes
@@ -407,7 +414,7 @@ tempOutputFolder <- function() {
   if (ncol(df) == 0L) return(df)
 
   sanitizeText <- function(x) {
-    # [FIX/ROBUSTNESS] A literal tab/newline inside an annotation value would
+    # A literal tab/newline inside an annotation value would
     # corrupt an unquoted TSV row. GTF-derived labels should not contain these,
     # but sanitize defensively so output remains one record per line.
     out <- x
@@ -430,7 +437,7 @@ tempOutputFolder <- function() {
       df[[nm]] <- sanitizeText(col)
       next
     }
-    # [FIX] Leave ordinary scalar vectors alone; only flatten columns that base
+    # Leave ordinary scalar vectors alone; only flatten columns that base
     # write.table() cannot safely serialize. The [[i]] path is important for
     # CharacterList/IntegerList/list columns because one table row can contain
     # multiple annotation values.
@@ -451,11 +458,6 @@ tempOutputFolder <- function() {
 }
 
 
-# [CHANGE — PRESERVE OLD MUTATION TABLE WHILE ADDING METADATA]
-# The old implementation wrote a fixed DetectedMutationsFor*.tsv schema. The new implementation
-# reconstructs that same schema/column order from the richer coding-effect object, using explicit mutant
-# depth metadata when predictCoding() does not carry the standard depth columns. WT/delta-AF evidence
-# is written separately in AllCandidateVariantsFor*.tsv rather than changing the old table.
 .originalDetectedMutationTable <- function(x) {
   df <- as.data.frame(x, stringsAsFactors = FALSE)
   originalCols <- c("seqnames", "start", "end", "width", "strand",
@@ -463,18 +465,11 @@ tempOutputFolder <- function() {
                     "GENEID", "TXID", "PROTEINLOC", "CONSEQUENCE",
                     "REFAA", "VARAA")
 
-  # Current predictCoding versions do not consistently propagate the query's
-  # standard depth columns, but the current object carries equivalent mutant
-  # evidence explicitly. Use it only to reconstruct the old table fields.
   if (!"refDepth" %in% names(df) && "mutRefDepth" %in% names(df))
     df$refDepth <- df$mutRefDepth
   if (!"altDepth" %in% names(df) && "mutAltDepth" %in% names(df))
     df$altDepth <- df$mutAltDepth
 
-  # The old table emitted the first protein-location value for this
-  # table. VariantAnnotation commonly stores PROTEINLOC as an IRanges/S4Vectors
-  # List derivative rather than a base list, so handle both without flattening the
-  # richer annotation retained in the in-memory object.
   if ("PROTEINLOC" %in% names(df)) {
     proteinLoc <- df$PROTEINLOC
     listLike <- is.list(proteinLoc) || methods::is(proteinLoc, "List") || !is.atomic(proteinLoc)
@@ -495,15 +490,10 @@ tempOutputFolder <- function() {
 }
 
 
-# [CHANGE — FULL SNV OUTPUT IN ADDITION TO OLD FILES]
-# The old implementation wrote coding-effect rows and expression output only, so noncoding
-# candidate SNVs disappeared from tabular output. The new implementation adds AllCandidateVariantsFor*
-# with the complete SNV/WT evidence while retaining the old mutation and
-# expression filenames/schema through the safe TSV writer.
 .writeCandidateTables <- function(candList, outputFolder){
   seqnames <- unique(c(names(candList$snps), names(candList$effects), names(candList$diff)))
   for (seqname in seqnames) {
-    # [IMPROVE] Always write the full candidate SNV set, including noncoding
+    # Always write the full candidate SNV set, including noncoding
     # variants and the new WT-vs-mutant allele-frequency evidence.
     if (!is.null(candList$snps[[seqname]])) {
       .writeTsv(candList$snps[[seqname]],
@@ -511,9 +501,6 @@ tempOutputFolder <- function() {
     }
 
     if (!is.null(candList$effects[[seqname]])) {
-      # Preserve the old DetectedMutations table schema and column order.
-      # The richer SNV/WT metadata stays available
-      # in AllCandidateVariantsFor*.tsv and in the returned MmapprData object.
       .writeTsv(.originalDetectedMutationTable(candList$effects[[seqname]]),
                 file.path(outputFolder, paste0("DetectedMutationsFor", seqname, ".tsv")))
     }

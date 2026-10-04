@@ -1,4 +1,4 @@
-% Manually synchronized with R/loess.R in the revised archive.
+% Manually synchronized with R/loess.R.
 \name{loessFit}
 \alias{loessFit}
 \title{Perform optimized LOESS regression for each chromosome}

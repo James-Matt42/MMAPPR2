@@ -1,4 +1,4 @@
-% Manually synchronized with R/peaks.R in the hardened revision.
+% Manually synchronized with R/peaks.R.
 \name{prePeak}
 \alias{prePeak}
 \title{Identify chromosomes containing linkage peaks}

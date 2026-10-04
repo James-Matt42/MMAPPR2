@@ -1,4 +1,4 @@
-% Manually synchronized with R/param.R in the hardened revision.
+% Manually synchronized with R/param.R.
 \name{mmapprParam}
 \alias{mmapprParam}
 \title{Construct MMAPPR2 analysis parameters}
@@ -25,6 +25,8 @@ mmapprParam(
   candidateMinAltFreq = 0.8,
   candidateMaxWtAltFreq = 1,
   candidateMinDeltaAF = 0,
+  candidatePoolMode = c("auto", "memory", "chunked"),
+  candidateChunkSize = 0,
   peakCutoffSd = 3,
   peakCutoffMethod = c("legacy_current", "global_sd"),
   peakIntervalMethod = c("hpd_span", "shortest_contiguous"),
@@ -32,7 +34,8 @@ mmapprParam(
   randomSeed = 1,
   pairedEnd = FALSE,
   ignoreStrand = FALSE,
-  expressionPseudocount = 0,
+  expressionPseudocount = 0.01,
+  exportAiccPlots = FALSE,
   overwrite = FALSE
 )
 }
@@ -53,23 +56,26 @@ mmapprParam(
 \item{loessOptResolution}{Target resolution of LOESS-span optimization. Default 0.001.}
 \item{loessOptCutFactor}{Coarse-to-fine LOESS optimization refinement factor. Default 0.1.}
 \item{maxPileupDepth}{Maximum reads considered per BAM at one linkage-stage pileup position. Default 1000; final candidate pileup retains the historical 250-read cap.}
-\item{candidateMinDepth}{Optional pooled mutant depth floor for a candidate SNV. Default 1 is effectively inert given the two-ALT-read rule and preserves the old effective candidate behavior.}
+\item{candidateMinDepth}{Optional pooled mutant depth floor for a candidate SNV. Default 1 is effectively inert given the two-ALT-read rule.}
 \item{candidateMinAltDepth}{Minimum pooled mutant reads supporting the alternative allele. Default 2.}
 \item{candidateMinAltFreq}{Minimum mutant alternative-allele frequency for a candidate. Default 0.80.}
 \item{candidateMaxWtAltFreq}{Optional maximum WT alternative-allele frequency. Default 1 disables this hard filter while WT evidence is still reported.}
 \item{candidateMinDeltaAF}{Optional minimum mutant-minus-WT alternative-allele-frequency difference. Default 0 disables this hard filter.}
+\item{candidatePoolMode}{Candidate-pileup memory strategy. \code{"auto"} (default) keeps the one-shot in-memory path when the interval is comfortably sized for available memory and otherwise uses bounded genomic chunks. \code{"memory"} prefers the one-shot path; \code{"chunked"} always uses bounded chunks. Allocation failures are retried with smaller chunks; the emergency mutant-candidate retry stages already-filtered chunk results in the R temporary directory and removes them automatically.}
+\item{candidateChunkSize}{Maximum candidate-pileup chunk width in bases. Default 0 chooses an adaptive size from available memory and the number of mutant BAM files.}
 \item{peakCutoffSd}{Multiplier applied to the variability term used by the selected initial peak-cutoff method. Default 3.}
-\item{peakCutoffMethod}{\code{"legacy_current"} (default) preserves the old cutoff calculation: mean of chromosome fitted-value means plus \code{peakCutoffSd} times the square root of the summed per-chromosome \code{var(fitted)/n}. \code{"global_sd"} uses the genome-wide fitted-value median plus \code{peakCutoffSd} times the ordinary fitted-value SD.}
+\item{peakCutoffMethod}{\code{"legacy_current"} (default) uses the compatibility cutoff calculation: mean of chromosome fitted-value means plus \code{peakCutoffSd} times the square root of the summed per-chromosome \code{var(fitted)/n}. \code{"global_sd"} uses the genome-wide fitted-value median plus \code{peakCutoffSd} times the ordinary fitted-value SD.}
 \item{peakIntervalMethod}{\code{"hpd_span"} (default) conservatively spans all KDE grid positions selected by the high-density mass rule, including separated modes. \code{"shortest_contiguous"} chooses the shortest single contiguous interval containing the requested mass.}
 \item{peakResampleIterations}{Number of half-marker LOESS resamples for peak refinement. Default 1000.}
 \item{randomSeed}{Base random seed used to make peak refinement reproducible. Default 1.}
 \item{pairedEnd}{Whether expression-summary counting should treat the RNA-seq data as paired-end fragments.}
-\item{ignoreStrand}{Whether strand is ignored in the descriptive expression summary. Default FALSE preserves the old strand-aware counting behavior.}
-\item{expressionPseudocount}{Optional pseudocount for descriptive log2 fold change. Default 0 preserves the old raw-count ratio; positive values explicitly add a pseudocount before the ratio.}
+\item{ignoreStrand}{Whether strand is ignored in the descriptive expression summary. Default FALSE uses strand-aware counting.}
+\item{expressionPseudocount}{Non-negative pseudocount added to WT and mutant mean counts before descriptive log2 fold change. Default 0.01 avoids Inf/NaN values at zero counts; set to 0 for the raw ratio.}
+\item{exportAiccPlots}{Whether \code{outputMmapprData()} should write \code{aicc_plots.pdf} from the AICc span-search evaluations retained by \code{loessFit()}. Default FALSE.}
 \item{overwrite}{If TRUE, explicitly permit clearing an existing non-empty output directory. Protected directories are still refused. Default FALSE.}
 }
 \value{A validated \code{MmapprParam} object.}
-\description{Constructs the parameter object used by the hardened MMAPPR2 workflow. Scalar settings are validated before filesystem side effects. BAM and FASTA indexes are created when missing and rebuilt when empty or older than the indexed input; the annotation input is preserved rather than destructively rewritten. BAM sequence names must match the reference FASTA exactly for regional queries.}
+\description{Constructs the parameter object used by the MMAPPR2 workflow. Scalar settings are validated before filesystem side effects. BAM and FASTA indexes are created when missing and rebuilt when empty or older than the indexed input; the annotation input is preserved rather than destructively rewritten. BAM sequence names must match the reference FASTA exactly for regional queries.}
 \examples{
 \dontrun{
 param <- mmapprParam(

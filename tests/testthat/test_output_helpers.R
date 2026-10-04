@@ -211,3 +211,25 @@ test_that("TSV serializer flattens list columns even for zero-row tables", {
   expect_invisible(MMAPPR2:::.writeTsv(x, out))
   expect_match(readLines(out, n = 1L, warn = FALSE), "annotations", fixed = TRUE)
 })
+
+
+test_that("AICc plot export uses retained search results without refitting", {
+  fx <- .make_synthetic_fixture()
+  on.exit(unlink(fx$dir, recursive = TRUE), add = TRUE)
+  out <- file.path(fx$dir, "out_aicc")
+  p <- mmapprParam(wtFiles = fx$bam, mutFiles = fx$bam,
+                   refFasta = fx$fasta, gtf = fx$gtf,
+                   outputFolder = out, includeScaffolds = TRUE,
+                   minDepth = 1, minBaseQuality = 0, minMapQuality = 0,
+                   exportAiccPlots = TRUE)
+  md <- mmapprData(p)
+  md@snpDistance <- list(chr1 = list(
+    aicc = data.frame(spans = c(.1, .2, .3), aiccValues = c(4, 2, 3)),
+    bestSpan = .2
+  ))
+
+  expect_invisible(MMAPPR2:::.plotAicc(md))
+  path <- file.path(out, "aicc_plots.pdf")
+  expect_true(file.exists(path))
+  expect_gt(file.info(path)$size, 0)
+})
