@@ -598,7 +598,7 @@ generateCandidates <- function(md) {
   }
   wide <- data.table::dcast(long, seqnames + pos ~ nucleotide,
                             value.var = "count", fun.aggregate = sum, fill = 0)
-  for (base in c("A", "C", "G", "T")) if (!base %in% names(wide)) wide[, (base) := 0]
+  for (base in c("A", "C", "G", "T")) if (!base %in% names(wide)) wide[, (base) := 0L]
   wide <- wide[, .(seqnames, pos, A, C, G, T)]
   wide[, totalDepth := A + C + G + T]
   wide <- wide[totalDepth > 0]
