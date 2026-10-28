@@ -149,6 +149,43 @@ MMAPPR2 writes:
 - `genome_plots.pdf`, `peak_plots.pdf`, `mmappr2.log`, and `mmappr_data.RDS`;
 - `aicc_plots.pdf` when `exportAiccPlots=TRUE` and finite AICc search results are available.
 
+# Figure styling and regeneration from RDS
+
+The standard pipeline still saves candidate TSV tables and `mmappr_data.RDS`
+**alongside** its genome/peak PDFs. Enable the optional AICc diagnostic PDF
+with `exportAiccPlots=TRUE` in `mmapprParam()`. Figure colors can be chosen for
+the automatic export without affecting tabular results:
+
+```{r styled-run, eval=FALSE}
+md <- mmappr(param, palette = "colorblind",
+             colors = c(peakFill = "#E69F00AA", density = "#0072B2"))
+```
+
+After the analysis completes, you can load *only* the saved results to produce
+figures again. This function does not read BAMs or FASTA, recalculate results,
+modify the RDS, or rewrite TSV tables:
+
+```{r replot, eval=FALSE}
+plotMmapprData("analysis_results/mmappr_data.RDS")
+plotMmapprData("analysis_results/mmappr_data.RDS",
+               outputDir = "publication_figures",
+               plots = c("genome", "peaks", "aicc"),
+               palette = "grayscale",
+               colors = c(fitted = "#222222", peakFill = "#AAAAAA"))
+```
+
+Default replot output is a new `replots` subdirectory beside the RDS (or inside
+the original analysis directory when passing a `MmapprData` object). The
+original `exportAiccPlots` setting does not affect RDS replotting; the saved
+span search history is enough. `overwrite=FALSE` protects existing PDFs, and
+`overwrite=TRUE` replaces only selected figure files; it never deletes TSVs.
+If analysis was interrupted, unavailable plot types are skipped with warnings.
+
+Choose `palette="default"`, `"colorblind"`, or `"grayscale"`. Optional `colors`
+overrides use named roles: `fitted`, `genomeRaw`, `peakRaw`, `peakFill`, `density`,
+`cutoff`, `boundary`, `aiccCurve`, `aiccSelected`. R color names and 6- or 8-digit
+hexadecimal codes are accepted.
+
 # Current methodological limits
 
 Some analyses require a larger, separately validated methodological extension. In particular:

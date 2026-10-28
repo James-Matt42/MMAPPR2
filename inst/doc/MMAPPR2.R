@@ -49,3 +49,13 @@
 # md <- peakRefinement(md)     # reproducible half-marker resampling
 # md <- generateCandidates(md) # mutant SNVs + WT evidence + coding effects
 # outputMmapprData(md)
+
+# md <- mmappr(param, palette = "colorblind",
+#              colors = c(peakFill = "#E69F00AA", density = "#0072B2"))
+
+# plotMmapprData("analysis_results/mmappr_data.RDS")
+# plotMmapprData("analysis_results/mmappr_data.RDS",
+#                outputDir = "publication_figures",
+#                plots = c("genome", "peaks", "aicc"),
+#                palette = "grayscale",
+#                colors = c(fitted = "#222222", peakFill = "#AAAAAA"))

@@ -1,6 +1,6 @@
 Package: MMAPPR2
 Title: Mutation Mapping Analysis Pipeline for Pooled RNA-Seq
-Version: 0.99.24.9009
+Version: 0.99.24.9011
 Authors@R: c(
     person("Kyle", "Johnsen", email = "kjohnsen@byu.edu", role = "aut"),
     person("Nathaniel", "Jenkins", role = "aut"),
@@ -33,7 +33,6 @@ Collate: 'MMAPPR2.R' 'all_generics.R' 'param.R' 'preflight.R'
         'mmapprData.R' 'distance.R' 'loess.R' 'peaks.R' 'candidates.R'
         'output.R' 'main.R'
 NeedsCompilation: no
-Packaged: 2026-09-18 15:59:55 UTC; root
 Author: Kyle Johnsen [aut],
   Nathaniel Jenkins [aut],
   Jonathon Hill [cre]

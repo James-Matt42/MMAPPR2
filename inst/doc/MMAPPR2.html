@@ -499,6 +499,33 @@ screen;</li>
 AICc search results are available.</li>
 </ul>
 </div>
+<div id="figure-styling-and-regeneration-from-rds" class="section level1">
+<h1>Figure styling and regeneration from RDS</h1>
+<p>Normal analysis still saves candidate TSV tables, genome and peak PDFs, and
+<code>mmappr_data.RDS</code>. Enable <code>exportAiccPlots=TRUE</code> in
+<code>mmapprParam()</code> for automatic AICc figures.</p>
+<p>Choose color schemes and individual figure colors for a normal run:</p>
+<pre class="r"><code>md &lt;- mmappr(param, palette = "colorblind",
+             colors = c(peakFill = "#E69F00AA", density = "#0072B2"))</code></pre>
+<p>Recreate figures later from saved analysis results without BAM/FASTA inputs,
+recomputation, modifying the RDS, or rewriting any candidate TSV tables:</p>
+<pre class="r"><code>plotMmapprData("analysis_results/mmappr_data.RDS")
+plotMmapprData("analysis_results/mmappr_data.RDS",
+               outputDir = "publication_figures",
+               plots = c("genome", "peaks", "aicc"),
+               palette = "grayscale",
+               colors = c(fitted = "#222222", peakFill = "#AAAAAA"))</code></pre>
+<p>The default replot destination is a separate <code>replots</code> folder.
+Color palettes are <code>default</code>, <code>colorblind</code>, or
+<code>grayscale</code>. Supported named overrides are <code>fitted</code>,
+<code>genomeRaw</code>, <code>peakRaw</code>, <code>peakFill</code>,
+<code>density</code>, <code>cutoff</code>, <code>boundary</code>,
+<code>aiccCurve</code>, and <code>aiccSelected</code>. AICc replotting
+works even if automatic AICc export was disabled originally, provided the
+span evaluations are in the RDS. Unavailable figures are skipped with a warning;
+existing PDFs are protected by default. <code>overwrite=TRUE</code> replaces
+only selected figure PDFs and never deletes other result files.</p>
+</div>
 <div id="current-methodological-limits" class="section level1">
 <h1>Current methodological limits</h1>
 <p>Some analyses require a larger, separately validated methodological

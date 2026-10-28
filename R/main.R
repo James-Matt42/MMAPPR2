@@ -10,6 +10,11 @@
 #'
 #' @param mmapprParam A \code{\linkS4class{MmapprParam}} object containing
 #'   desired parameters.
+#' @param palette Named output-figure palette: \code{"default"},
+#'   \code{"colorblind"}, or \code{"grayscale"}. Does not change
+#'   analysis or tabular output.
+#' @param colors Optional named color overrides for output figures; see
+#'   \code{\link{plotMmapprData}} for role names.
 #'
 #' @return A \code{\linkS4class{MmapprData}} object containing results
 #'   and/or intermediate data.
@@ -28,7 +33,7 @@
 #'     # Run pipeline:
 #'     mmapprData <- mmappr(mmappr_param)
 #' }
-#' 
+#'
 #' \dontrun{
 #' ### Alternately, you can navigate the pipeline step by step.
 #' ### This may be helpful for debugging.
@@ -43,11 +48,14 @@
 #'
 #' @seealso \code{\link{calculateDistance}}, \code{\link{loessFit}},
 #'   \code{\link{prePeak}}, \code{\link{peakRefinement}},
-#'   \code{\link{generateCandidates}}, \code{\link{outputMmapprData}}
-#'   
+#'   \code{\link{generateCandidates}}, \code{\link{outputMmapprData}},
+#'   \code{\link{plotMmapprData}}
+#'
 NULL
 
-mmappr <- function(mmapprParam) {
+mmappr <- function(mmapprParam, palette = "default", colors = NULL) {
+    # Fail fast on invalid styling, before doing any expensive analysis.
+    .plotPaletteColors(palette, colors)
     startTime <- Sys.time()
     message("------------------------------------")
     message("-------- Welcome to MMAPPR2 --------")
@@ -76,7 +84,12 @@ mmappr <- function(mmapprParam) {
         .messageAndLog('Generating, analyzing, and ranking candidate variants...', oF)
         md <- generateCandidates(md)
         .messageAndLog("Writing output plots and tables...", oF)
-        outputMmapprData(md)
+        # Preserve the original one-argument call for standard runs and any
+        # existing code that replaces/mocks outputMmapprData(md).
+        if (identical(palette, "default") && is.null(colors))
+            outputMmapprData(md)
+        else
+            outputMmapprData(md, palette = palette, colors = colors)
 
         md  # return for use after block
     },
